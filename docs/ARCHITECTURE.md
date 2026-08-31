@@ -70,6 +70,24 @@ future verify-sandbox implementation
 
 Batch 4 Part 1 provides application-side orchestration; Batch 4 Part 3 adds the transport boundary and a bounded local subprocess adapter. VerifyAgent still does not execute commands itself, invoke Docker, or implement sandbox isolation.
 
+### Evidence and result boundary
+
+```text
+CheckResult[]
+     ↓
+Evidence
+     ↓
+Finding
+     ↓
+PolicyEvaluator
+     ↓
+PolicyDecision
+     ↓
+VerificationResult
+```
+
+Evidence and findings are deterministic, traceable facts. Policy interprets those facts but cannot rewrite check results. The Batch 6 default evaluator is provider-independent and does not call AI or execute code.
+
 ## External boundaries
 
 ### `verify-contracts`

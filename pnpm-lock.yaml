@@ -63,6 +63,9 @@ importers:
       "@verify-agent/domain":
         specifier: workspace:*
         version: link:../domain
+      "@verify-agent/policy":
+        specifier: workspace:*
+        version: link:../policy
 
   packages/goat:
     dependencies:

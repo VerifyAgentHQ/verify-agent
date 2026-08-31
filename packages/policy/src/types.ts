@@ -1,14 +1,20 @@
 import type {
   CheckResult,
+  Evidence,
+  Finding,
   Policy,
   PolicyDecision,
-  VerificationResult,
+  CheckId,
 } from "@verify-agent/domain";
 
 export interface PolicyDecisionContext {
-  results: CheckResult[];
+  readonly results: readonly CheckResult[];
+  readonly evidence: readonly Evidence[];
+  readonly findings: readonly Finding[];
   policy: Policy;
-  verification: VerificationResult;
+  readonly requiredCheckIds: readonly CheckId[];
+  readonly unsupportedRequiredCapabilities: readonly string[];
+  readonly createdAt: string;
 }
 
 export interface PolicyEvaluator {
@@ -18,4 +24,9 @@ export interface PolicyEvaluator {
 export interface PolicyGate {
   readonly name: string;
   evaluate(context: PolicyDecisionContext): Promise<PolicyDecision>;
+}
+
+export interface DefaultPolicy {
+  readonly policy: Policy;
+  readonly evaluator: PolicyEvaluator;
 }

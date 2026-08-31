@@ -45,6 +45,17 @@ export {
   createVerificationPipeline,
   VerificationPipelineError,
 } from "./pipeline.js";
+export {
+  aggregateVerification,
+  aggregationInputFromPipeline,
+  coverageForPlan,
+  evidenceForCheckResult,
+  findingsForCheckResults,
+} from "./aggregation.js";
+export type {
+  VerificationAggregationInput,
+  VerificationAggregationOutput,
+} from "./aggregation.js";
 export type {
   ProjectDetectionPort,
   VerificationPipeline,

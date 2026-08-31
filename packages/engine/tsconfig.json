@@ -7,5 +7,9 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../checks" }, { "path": "../domain" }]
+  "references": [
+    { "path": "../checks" },
+    { "path": "../domain" },
+    { "path": "../policy" }
+  ]
 }

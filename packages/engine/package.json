@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@verify-agent/checks": "workspace:*",
-    "@verify-agent/domain": "workspace:*"
+    "@verify-agent/domain": "workspace:*",
+    "@verify-agent/policy": "workspace:*"
   }
 }

@@ -23,6 +23,8 @@ The domain is deterministic, provider-independent, runtime-independent, and pers
 | `VerificationCoverage`            | Capability-oriented coverage categories                          | Immutable value      |
 | `VerificationResult`              | Final result for one request, job, and source state              | Immutable fact       |
 
+Batch 6 adds deterministic producers around these existing models. Each `CheckResult` becomes `check.result` evidence whose hash excludes generation time. Failed, timed-out, errored, or cancelled results produce evidence-backed findings; skipped checks do not create findings but leave partial coverage. Cancellation is treated as an unverified high-severity condition and is blocked by the default policy.
+
 ## Identity and invariants
 
 Branded IDs (`ProjectId`, `RepositorySnapshotId`, `ChangeSetId`, `VerificationId`, `VerificationRequestId`, `VerificationJobId`, `CheckId`, `CheckExecutionId`, `CheckResultId`, `EvidenceId`, `FindingId`, `PolicyId`, and `PolicyDecisionId`) prevent accidental identifier interchange at compile time. `brandId` applies the identifier character constraints without importing the public schema validator.
@@ -61,6 +63,8 @@ VerificationResult
 ```
 
 `VerificationResult` identifies the request, job, project, snapshot, change set, check results, evidence, findings, and policy decision. A new source commit creates a new snapshot and result; historical facts expose no mutation or setter API.
+
+The default policy blocks required failures and high/critical findings, requests changes for unsupported required capabilities, and requests review for medium findings. With no blocking condition, incomplete coverage produces `partial`; complete successful required coverage produces `pass`. An explicit check-result infrastructure error maps to result status `error`, which has precedence over policy outcomes. Result and evidence content hashes exclude `createdAt`.
 
 ## Provenance and public mapping
 

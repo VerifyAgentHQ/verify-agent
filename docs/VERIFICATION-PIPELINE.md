@@ -44,8 +44,16 @@ Sandbox status and check status remain distinct: a completed zero exit code pass
 
 The current `EXECUTE` stage is an application-side boundary, not a claim that VerifyAgent owns isolation. Tests use an in-memory fake transport and a deterministic protocol harness; no repository code, package manager, Cargo process, Docker runtime, or real target repository is invoked. The sibling `verify-sandbox` process entrypoint is compatible with this transport when supplied through trusted configuration; Docker-backed integration is intentionally separate from the normal suite.
 
+## Deterministic result boundary
+
+After check execution, Batch 6 normalizes each factual `CheckResult` into immutable `Evidence`, derives only evidence-backed `Finding` objects, evaluates the default versioned policy, and assembles an immutable `VerificationResult`. Failed, timed-out, errored, and cancelled checks create high-severity findings; skipped checks create no finding and contribute to partial coverage. Cancellation is therefore explicit and does not silently disappear.
+
+The default policy maps required failures and high/critical findings to `block`, unsupported required capabilities to `needs_changes`, and medium findings to `needs_review`. If policy allows but applicable capabilities remain unchecked, the result is `partial`; otherwise it is `pass`. An infrastructure `CheckResult` error maps to result `error` above policy outcome. Content hashes exclude timestamps and are based on canonical stable references and facts.
+
 ## Later stages
 
 - `PLAN`: convert applicable profile capabilities into an explicit, explainable check plan. Implemented in Phase 1 Batch 3; it does not execute checks.
 - `EXECUTE`: application-side orchestration and transport boundary implemented in Batch 4 Part 3; the real sandbox process can be selected through trusted configuration, while Docker-backed integration remains separately gated.
-- `COLLECT`, `ANALYZE`, `POLICY`, and `RESULT`: assemble evidence, findings, decisions, and final results in later phases.
+- `COLLECT`: deterministic evidence and finding aggregation implemented in Phase 1 Batch 6.
+- `POLICY`: deterministic default policy evaluation and outcome mapping implemented in Phase 1 Batch 6; AI interpretation remains later.
+- `RESULT`: immutable deterministic `VerificationResult` assembly implemented in Phase 1 Batch 6.
