@@ -21,3 +21,12 @@ export type {
   PlannerConfig,
   PlannerOverride,
 } from "./planner.js";
+export {
+  createTrustedExecutionSpecRegistry,
+  trustedExecutionSpecs,
+} from "./execution-specs.js";
+export type {
+  CheckExecutionSpec,
+  CheckRuntime,
+  TrustedExecutionSpecRegistry,
+} from "./execution-specs.js";

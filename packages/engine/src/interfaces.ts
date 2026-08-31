@@ -1,25 +1,59 @@
+import type { CheckExecutionSpec } from "@verify-agent/checks";
 import type {
   ChangeSet,
   CheckDefinition,
+  CheckExecution,
+  CheckPlanItem,
+  CheckResult,
   Evidence,
   Project,
   ProjectProfile,
   PublicSourceReference,
+  RepositorySnapshot,
   VerificationRequest,
   VerificationResult,
 } from "@verify-agent/domain";
 import { publicContract } from "@verify-agent/domain";
+
+export type SandboxStatus =
+  "completed" | "failed" | "timed_out" | "cancelled" | "error";
+
+export interface SandboxCommand {
+  readonly executable: string;
+  readonly args: readonly string[];
+  readonly workingDirectory: ".";
+  readonly environment: Readonly<Record<string, string>>;
+}
+
+export interface ExecutionLimits {
+  readonly timeoutMs: number;
+  readonly memoryLimitBytes: number;
+}
+
+export const DEFAULT_EXECUTION_LIMITS: ExecutionLimits = Object.freeze({
+  timeoutMs: 120_000,
+  memoryLimitBytes: 512 * 1024 * 1024,
+});
 
 export interface SandboxJobRequest {
   readonly schemaVersion: typeof publicContract.schemaVersion;
   readonly jobId: string;
   readonly source: PublicSourceReference;
   readonly snapshot: string;
+  readonly commands: readonly SandboxCommand[];
+  readonly resourceLimits: ExecutionLimits;
+  readonly networkPolicy: "none" | "restricted" | "allowlist";
+  readonly artifactPolicy: "none" | "declared";
+}
+
+/** Wire shape kept separate because verify-contracts currently uses strings. */
+export interface PublicSandboxJobRequest {
+  readonly schemaVersion: typeof publicContract.schemaVersion;
+  readonly jobId: string;
+  readonly source: PublicSourceReference;
+  readonly snapshot: string;
   readonly commands: readonly string[];
-  readonly resourceLimits: Readonly<{
-    timeoutMs: number;
-    memoryLimitBytes: number;
-  }>;
+  readonly resourceLimits: ExecutionLimits;
   readonly networkPolicy: "none" | "restricted" | "allowlist";
   readonly artifactPolicy: "none" | "declared";
 }
@@ -27,7 +61,7 @@ export interface SandboxJobRequest {
 export interface SandboxJobResult {
   readonly schemaVersion: typeof publicContract.schemaVersion;
   readonly jobId: string;
-  readonly status: "completed" | "failed" | "timed_out" | "cancelled" | "error";
+  readonly status: SandboxStatus;
   readonly durationMs: number;
   readonly logsRef: string;
   readonly artifactRefs: readonly string[];
@@ -37,6 +71,32 @@ export interface SandboxJobResult {
   }>;
   readonly errors: readonly string[];
   readonly exitCode?: number;
+}
+
+export interface CheckExecutionRequest {
+  readonly project: Project;
+  readonly profile: ProjectProfile;
+  readonly snapshot: RepositorySnapshot;
+  readonly planItem: CheckPlanItem;
+  readonly definition: CheckDefinition;
+  readonly execution: CheckExecution;
+  readonly resultId: string;
+  readonly createdAt: string;
+  readonly limits?: ExecutionLimits;
+}
+
+export interface CheckExecutionOutcome {
+  readonly request: SandboxJobRequest;
+  readonly execution: CheckExecution;
+  readonly result: CheckResult;
+}
+
+export interface SandboxExecutor {
+  execute(request: SandboxJobRequest): Promise<SandboxJobResult>;
+}
+
+export interface CheckExecutor {
+  execute(request: CheckExecutionRequest): Promise<CheckExecutionOutcome>;
 }
 
 export interface EngineContext {
@@ -54,17 +114,15 @@ export interface CheckPlanner {
   plan(context: EngineContext): Promise<CheckDefinition[]>;
 }
 
-export interface SandboxExecutor {
-  execute(request: SandboxJobRequest): Promise<SandboxJobResult>;
-}
-
 export interface ResultAssembler {
   assemble(
     context: EngineContext,
-    evidence: Evidence[],
+    evidence: readonly Evidence[],
   ): Promise<VerificationResult>;
 }
 
 export interface VerificationOrchestrator {
   run(request: VerificationRequest): Promise<VerificationResult>;
 }
+
+export type { CheckExecutionSpec };

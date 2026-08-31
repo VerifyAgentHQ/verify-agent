@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --pretty false"
   },
   "dependencies": {
+    "@verify-agent/checks": "workspace:*",
     "@verify-agent/domain": "workspace:*"
   }
 }

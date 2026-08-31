@@ -57,6 +57,9 @@ importers:
 
   packages/engine:
     dependencies:
+      "@verify-agent/checks":
+        specifier: workspace:*
+        version: link:../checks
       "@verify-agent/domain":
         specifier: workspace:*
         version: link:../domain

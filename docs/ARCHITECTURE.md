@@ -56,6 +56,20 @@ This means domain entities and engine orchestration avoid importing GitHub, AI-p
 - The engine depends on stable interfaces instead of concrete provider code.
 - The sandbox boundary is expressed as an internal `SandboxExecutor` interface; execution details remain outside this repository.
 
+### Check execution boundary
+
+`packages/checks` owns trusted, structured execution specifications for catalogued checks. `packages/engine` maps a queued `CheckExecution` to an internal sandbox request and delegates through `SandboxExecutor`:
+
+```text
+CheckExecutor
+     ↓
+SandboxExecutor interface
+     ↓
+future verify-sandbox implementation
+```
+
+Batch 4 Part 1 provides application-side orchestration and an in-memory fake for tests only. It does not execute commands, invoke Docker, or implement the sandbox runtime.
+
 ## External boundaries
 
 ### `verify-contracts`
