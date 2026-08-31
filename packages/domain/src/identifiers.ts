@@ -3,6 +3,7 @@ export type Brand<T, B extends string> = T & { readonly __brand: B };
 export type ProjectId = Brand<string, "ProjectId">;
 export type RepositorySnapshotId = Brand<string, "RepositorySnapshotId">;
 export type ChangeSetId = Brand<string, "ChangeSetId">;
+export type CheckPlanId = Brand<string, "CheckPlanId">;
 export type VerificationId = Brand<string, "VerificationId">;
 export type VerificationRequestId = Brand<string, "VerificationRequestId">;
 export type VerificationJobId = Brand<string, "VerificationJobId">;

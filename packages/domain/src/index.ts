@@ -5,6 +5,7 @@ export * from "./project.js";
 export * from "./changes-internal.js";
 export * from "./changes.js";
 export * from "./checks.js";
+export * from "./check-plan.js";
 export * from "./evidence.js";
 export * from "./findings.js";
 export * from "./policy.js";

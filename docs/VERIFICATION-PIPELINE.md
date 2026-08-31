@@ -5,7 +5,9 @@ The pipeline is staged so that static project detection is separated from check 
 ```text
 INGEST
   |
-DETECT  <-- Phase 1 Batch 2 ends here
+DETECT
+  |
+PLAN  <-- Phase 1 Batch 3 ends here
   |
 PLAN
   |
@@ -30,8 +32,14 @@ The initial static signals cover TypeScript/JavaScript, Rust, Soroban-related me
 
 Filesystem safety is enforced at the inspection boundary. Paths are normalized and repository-root constrained; symbolic links and Windows reparse-point entries are skipped rather than followed. Recursive discovery is deterministic, capped at eight directory levels, and skips `.git`, `node_modules`, `target`, `.next`, `dist`, `build`, and `coverage` because these are generated, dependency, or otherwise heavy trees that do not provide authoritative project metadata. A platform that cannot create junctions for tests still receives the production guard; the test suite covers the guard where the OS permits junction creation.
 
+## Planning boundary
+
+`packages/checks` converts a validated `ProjectProfile` into one deterministic `CheckPlan`. The static check catalog contains stable check IDs and versions but no commands. Plan items record applicability, required/optional classification, reason, priority, repository scope, and simple dependencies. Applicability means a check appears relevant; it is not an execution result.
+
+Planner configuration can require, optionally select, or disable checks. A configured check without a detected capability is represented as `unsupported` with an explanation. Disabled checks are represented as `not_applicable`. Plan content is canonicalized through stable ordering and hashed with SHA-256; planner version and a fixed planning timestamp make identical inputs produce identical plans without wall-clock or network dependencies.
+
 ## Later stages
 
-- `PLAN`: convert applicable profile capabilities into check definitions. Not implemented in this batch.
+- `PLAN`: convert applicable profile capabilities into an explicit, explainable check plan. Implemented in Phase 1 Batch 3; it does not execute checks.
 - `EXECUTE`: run approved checks through the external sandbox boundary. Not implemented here.
 - `COLLECT`, `ANALYZE`, `POLICY`, and `RESULT`: assemble evidence, findings, decisions, and final results in later phases.
