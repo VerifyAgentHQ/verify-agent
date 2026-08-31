@@ -1,2 +1,159 @@
-# verify-agent
-Core VerifyAgent platform for evidence-backed software change verification across GitHub repositories, languages, and development ecosystems.
+# VerifyAgent
+
+VerifyAgent is an evidence-first software-change verification platform. It turns a pull request or repository change into a structured verification flow that detects the project, plans relevant checks, executes them in a secure boundary, collects evidence, and applies policy before returning a final result.
+
+## Current status
+
+Phase 0 bootstrap is in progress. This repository establishes the product architecture, the internal domain model, the package boundaries, and the compile-safe interfaces required before later feature phases.
+
+This repository intentionally does not implement:
+
+- GitHub App or webhook integrations
+- a real sandbox executor
+- Docker or runtime execution logic
+- AI provider integrations
+- GOAT integration
+- dashboard or marketplace features
+- database persistence
+
+## Product flow
+
+```text
+GitHub Pull Request
+       ↓
+VerifyAgent
+       ↓
+Project Detection
+       ↓
+Check Planning
+       ↓
+Secure Execution
+       ↓
+Evidence
+       ↓
+AI reasoning where appropriate
+       ↓
+Policy
+       ↓
+VerificationResult
+       ↓
+GitHub feedback
+```
+
+## Supported ecosystems
+
+Initial supported ecosystems are intentionally limited to the Phase 0 architecture boundary:
+
+- TypeScript / JavaScript
+- Rust / Soroban
+
+The architecture is designed to support future ecosystems without changing the core engine, including:
+
+- Python
+- Go
+- Solidity / EVM
+- Java / Kotlin
+- C#
+- C / C++
+- other ecosystems based on product need
+
+## Repository relationships
+
+```text
+VerifyAgentHQ
+│
+├── verify-contracts
+│     public contracts
+│
+├── verify-sandbox
+│     secure execution
+│
+└── verify-agent
+      verification product
+```
+
+This repository depends on the approved boundary contracts from `verify-contracts` and the isolated execution boundary from `verify-sandbox`. Those sibling repositories are authoritative; this repository does not modify them.
+
+## Architecture overview
+
+The product uses a ports-and-adapters structure with a central domain model and orchestration engine:
+
+```text
+DOMAIN
+   ↓
+ENGINE
+   ↓
+CHECKS / POLICY / AI
+   ↓
+APPLICATIONS
+   ↓
+EXTERNAL ADAPTERS
+```
+
+The system separates:
+
+- immutable verification facts
+- versioned definitions such as checks and policies
+- external public contracts
+- internal semantic models
+- secure execution boundary concerns
+
+## Phase 0 structure
+
+```text
+verify-agent/
+├── README.md
+├── AGENTS.md
+├── package.json
+├── pnpm-lock.yaml
+├── tsconfig.json
+├── pnpm-workspace.yaml
+├── vitest.config.ts
+├── apps/
+│   ├── api/
+│   ├── worker/
+│   └── github-bot/
+├── packages/
+│   ├── domain/
+│   ├── engine/
+│   ├── checks/
+│   ├── policy/
+│   ├── adapters-lang/
+│   ├── adapters-source/
+│   ├── ai/
+│   ├── goat/
+│   └── config/
+├── tests/
+├── fixtures/
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── DOMAIN-MODEL.md
+│   ├── VERIFICATION-PIPELINE.md
+│   └── decisions/
+├── scripts/
+├── infrastructure/
+└── .github/
+```
+
+## Development commands
+
+```bash
+pnpm install --frozen-lockfile
+pnpm format
+pnpm format:check
+pnpm typecheck
+pnpm test
+```
+
+## Security statement
+
+This Phase 0 bootstrap intentionally does not execute untrusted code inside the product repository. Execution is delegated to the external `verify-sandbox` boundary, which is the security-controlled environment. The product remains evidence-first and must not bypass public contracts or security boundaries.
+
+## Roadmap summary
+
+- Phase 0: architecture, boundaries, compile safety, contracts integration guidance
+- Phase 1: project detection and check planning
+- Phase 2: sandbox orchestration and evidence collection
+- Phase 3: policy evaluation and result model completion
+- Phase 4: GitHub feedback and production workflow integration
+- later phases: AI reasoning, GOAT, ecosystem expansion, and operational maturity
