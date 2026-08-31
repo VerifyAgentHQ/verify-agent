@@ -48,7 +48,9 @@ The current `EXECUTE` stage is an application-side boundary, not a claim that Ve
 
 After check execution, Batch 6 normalizes each factual `CheckResult` into immutable `Evidence`, derives only evidence-backed `Finding` objects, evaluates the default versioned policy, and assembles an immutable `VerificationResult`. Failed, timed-out, errored, and cancelled checks create high-severity findings; skipped checks create no finding and contribute to partial coverage. Cancellation is therefore explicit and does not silently disappear.
 
-The default policy maps required failures and high/critical findings to `block`, unsupported required capabilities to `needs_changes`, and medium findings to `needs_review`. If policy allows but applicable capabilities remain unchecked, the result is `partial`; otherwise it is `pass`. An infrastructure `CheckResult` error maps to result `error` above policy outcome. Content hashes exclude timestamps and are based on canonical stable references and facts.
+The default policy maps required failures and high/critical findings to `block`, unsupported required capabilities or required non-real execution to `needs_changes`, and medium findings to `needs_review`. If policy allows but applicable capabilities remain unchecked or only synthetic results are available, the result is `partial`; otherwise real successful execution produces `pass`. An infrastructure `CheckResult` error maps to result `error` above policy outcome. Content hashes exclude timestamps and include semantic execution provenance.
+
+Batch 8 dogfood is read-only. `CheckResult.executionSource` makes the distinction explicit: `real` results come through the sandbox execution boundary, while `simulated` and `fixture` values are controlled non-production inputs. Transport provenance is explicit and fail-closed; missing provenance is rejected and never treated as real. Synthetic results can exercise aggregation but never enter `verified` coverage or satisfy required production policy. They are not evidence that Stellar Forge commands ran.
 
 ## Optional AI reasoning
 

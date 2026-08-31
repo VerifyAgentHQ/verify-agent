@@ -10,6 +10,7 @@ import type {
   ProjectProfile,
   PublicSourceReference,
   RepositorySnapshot,
+  ExecutionSource,
   VerificationRequest,
   VerificationResult,
 } from "@verify-agent/domain";
@@ -61,6 +62,7 @@ export interface PublicSandboxJobRequest {
 export type PublicSandboxJobResult = SandboxJobResult;
 
 export interface SandboxTransport {
+  readonly executionSource: ExecutionSource;
   execute(
     request: PublicSandboxJobRequest,
     signal?: AbortSignal,
@@ -110,12 +112,15 @@ export interface CheckExecutionOutcome {
 }
 
 export interface SandboxExecutor {
+  readonly executionSource: ExecutionSource;
   execute(request: SandboxJobRequest): Promise<SandboxJobResult>;
 }
 
 export interface CheckExecutor {
   execute(request: CheckExecutionRequest): Promise<CheckExecutionOutcome>;
 }
+
+export type { ExecutionSource };
 
 export interface EngineContext {
   project: Project;

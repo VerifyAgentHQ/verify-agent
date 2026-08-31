@@ -20,7 +20,7 @@ EXTERNAL ADAPTERS
 
 ## Package responsibilities
 
-- `packages/domain`: internal semantic model, types, provenance, immutability rules, and contract mapping guidance.
+- `packages/domain`: internal semantic model, execution provenance, types, immutability rules, and contract mapping guidance.
 - `packages/engine`: orchestration boundaries for project detection, check planning, execution coordination, evidence assembly, and final result shaping.
 - `packages/checks`: check definitions and execution model. Checks establish facts; they do not decide policy.
 - `packages/policy`: policy evaluation that interprets evidence and determines a decision.
@@ -98,6 +98,8 @@ CheckResults[] → Evidence → ┬→ deterministic Findings ─┐
 ```
 
 `packages/ai` accepts bounded context and evidence, labels repository-derived content as untrusted, validates structured provider output, and records deterministic/AI conflicts. It cannot rewrite `CheckResult`, evidence, or deterministic findings. No provider SDK is installed; provider failures do not invalidate deterministic verification by default.
+
+Execution provenance is internal semantic data and fail-closed. `SandboxTransport.executionSource` is required and `CheckResult.executionSource` is explicit (`real`, `simulated`, or `fixture`) and propagated into evidence. Missing or unknown provenance is rejected; it is never interpreted as real execution. Only real successful execution contributes to production verified coverage; the current public contract has no provenance field.
 
 ## External boundaries
 

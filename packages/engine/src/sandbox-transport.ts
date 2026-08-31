@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
 import type {
+  ExecutionSource,
   PublicSandboxJobRequest,
   PublicSandboxJobResult,
   SandboxExecutor,
@@ -19,6 +20,14 @@ const SANDBOX_STATUSES = new Set([
   "cancelled",
   "error",
 ]);
+
+function requireExecutionSource(value: unknown): ExecutionSource {
+  if (value === "real" || value === "simulated" || value === "fixture")
+    return value;
+  throw new SandboxTransportError(
+    "sandbox transport must explicitly declare execution provenance",
+  );
+}
 
 export class SandboxProtocolError extends Error {
   constructor(message: string) {
@@ -270,6 +279,7 @@ function terminate(child: ChildProcess): void {
 }
 
 export class SubprocessSandboxTransport implements SandboxTransport {
+  readonly executionSource = "real" as const;
   constructor(private readonly config: SandboxProcessConfig) {
     validateConfig(config);
   }
@@ -362,7 +372,9 @@ export class SubprocessSandboxTransport implements SandboxTransport {
 export function createSandboxExecutorFromTransport(
   transport: SandboxTransport,
 ): SandboxExecutor {
+  const executionSource = requireExecutionSource(transport.executionSource);
   return {
+    executionSource,
     async execute(
       request: SandboxJobRequest,
     ): Promise<import("./interfaces.js").SandboxJobResult> {
@@ -376,6 +388,7 @@ export function createSandboxExecutorFromTransport(
 }
 
 export class FakeSandboxTransport implements SandboxTransport {
+  readonly executionSource = "simulated" as const;
   readonly requests: PublicSandboxJobRequest[] = [];
 
   constructor(

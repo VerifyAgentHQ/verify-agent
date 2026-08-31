@@ -53,6 +53,7 @@ export function evidenceForCheckResult(result: CheckResult): Evidence {
     artifactRefs: [...result.artifactRefs],
     metrics: { ...result.metrics },
     inputHash: result.inputHash,
+    executionSource: result.executionSource,
   };
   const contentHash = hash(content);
   const evidence: Evidence = {
@@ -67,6 +68,7 @@ export function evidenceForCheckResult(result: CheckResult): Evidence {
     producer: result.producer ?? evidenceProducer,
     createdAt: result.createdAt,
     contentHash,
+    executionSource: result.executionSource,
   };
   validateEvidence(evidence);
   return evidence;
@@ -152,11 +154,15 @@ export function coverageForPlan(
     partial: string[];
     unsupported: string[];
     notApplicable: string[];
+    simulated: string[];
+    fixture: string[];
   } = {
     verified: [],
     partial: [],
     unsupported: [],
     notApplicable: [],
+    simulated: [],
+    fixture: [],
   };
   for (const item of plan.items) {
     const capability = String(item.checkId);
@@ -166,7 +172,18 @@ export function coverageForPlan(
       coverage.notApplicable.push(capability);
     else {
       const result = resultByCheck.get(capability);
-      if (result?.status === "passed") coverage.verified.push(capability);
+      if (result?.status === "passed" && result.executionSource === "real")
+        coverage.verified.push(capability);
+      else if (
+        result?.status === "passed" &&
+        result.executionSource === "simulated"
+      )
+        coverage.simulated.push(capability);
+      else if (
+        result?.status === "passed" &&
+        result.executionSource === "fixture"
+      )
+        coverage.fixture.push(capability);
       else coverage.partial.push(capability);
     }
   }
@@ -175,6 +192,8 @@ export function coverageForPlan(
     partial: sortedUnique(coverage.partial),
     unsupported: sortedUnique(coverage.unsupported),
     notApplicable: sortedUnique(coverage.notApplicable),
+    simulated: sortedUnique(coverage.simulated),
+    fixture: sortedUnique(coverage.fixture),
   };
 }
 
@@ -206,7 +225,10 @@ function statusFor(
   if (outcome === "block") return "blocked";
   if (outcome === "needs_changes") return "needs_changes";
   if (outcome === "needs_review") return "needs_review";
-  return coverage.partial.length > 0 || coverage.unsupported.length > 0
+  return coverage.partial.length > 0 ||
+    coverage.unsupported.length > 0 ||
+    coverage.simulated.length > 0 ||
+    coverage.fixture.length > 0
     ? "partial"
     : "pass";
 }
@@ -223,6 +245,15 @@ export function aggregateVerification(
   const unsupportedRequiredCapabilities = input.plan.items
     .filter((item) => item.required && item.applicability === "unsupported")
     .map((item) => String(item.checkId));
+  const nonRealRequiredCheckIds = input.plan.items
+    .filter((item) => item.required && item.applicability === "applicable")
+    .map((item) => item.checkId)
+    .filter((checkId) => {
+      const result = input.checkResults.find(
+        (candidate) => candidate.checkId === checkId,
+      );
+      return result !== undefined && result.executionSource !== "real";
+    });
   const policy = input.policy ?? createDefaultPolicy().policy;
   const policyDecision = evaluateDefaultPolicy({
     results: input.checkResults,
@@ -231,6 +262,7 @@ export function aggregateVerification(
     policy,
     requiredCheckIds,
     unsupportedRequiredCapabilities,
+    nonRealRequiredCheckIds,
     createdAt: input.createdAt,
   });
   const status = statusFor(

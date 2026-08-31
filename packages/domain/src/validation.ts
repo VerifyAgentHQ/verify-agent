@@ -157,6 +157,11 @@ export function validateCheckExecution(value: CheckExecution): void {
     fail("invalid check execution status");
   if (value.startedAt) isoDate(value.startedAt, "startedAt");
   if (value.completedAt) isoDate(value.completedAt, "completedAt");
+  if (
+    value.executionSource !== undefined &&
+    !["real", "simulated", "fixture"].includes(value.executionSource)
+  )
+    fail("invalid execution source");
 }
 export function validateCheckResult(value: CheckResult): void {
   identifier(value.id, "check result id");
@@ -181,6 +186,8 @@ export function validateCheckResult(value: CheckResult): void {
   isoDate(value.createdAt, "createdAt");
   if (!value.producer.type || !value.producer.name)
     fail("check result requires producer provenance");
+  if (!["real", "simulated", "fixture"].includes(value.executionSource))
+    fail("invalid execution source");
 }
 export function validateEvidence(value: Evidence): void {
   identifier(value.id, "evidence id");
@@ -195,6 +202,8 @@ export function validateEvidence(value: Evidence): void {
   isoDate(value.createdAt, "createdAt");
   if (!value.producer.type || !value.producer.name)
     fail("evidence requires producer provenance");
+  if (!["real", "simulated", "fixture"].includes(value.executionSource))
+    fail("invalid evidence execution source");
 }
 export function validateFindingLocation(value: FindingLocation): void {
   normalizePath(value.path);
@@ -266,6 +275,8 @@ export function validateCoverage(value: VerificationCoverage): void {
     value.partial,
     value.unsupported,
     value.notApplicable,
+    value.simulated,
+    value.fixture,
   ];
   const seen = new Set<string>();
   for (const group of groups)

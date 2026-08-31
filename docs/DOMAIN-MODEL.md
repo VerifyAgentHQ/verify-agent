@@ -64,9 +64,13 @@ VerificationResult
 
 `VerificationResult` identifies the request, job, project, snapshot, change set, check results, evidence, findings, and policy decision. A new source commit creates a new snapshot and result; historical facts expose no mutation or setter API.
 
-The default policy blocks required failures and high/critical findings, requests changes for unsupported required capabilities, and requests review for medium findings. With no blocking condition, incomplete coverage produces `partial`; complete successful required coverage produces `pass`. An explicit check-result infrastructure error maps to result status `error`, which has precedence over policy outcomes. Result and evidence content hashes exclude `createdAt`.
+`CheckResult.executionSource` is required and is one of `real`, `simulated`, or `fixture`. The source is copied to derived `Evidence`; findings retain it through their evidence references. Execution provenance is fail-closed: a transport must declare its source explicitly, and missing or unknown provenance is rejected rather than defaulted to `real`. Only `real` results can populate internal `VerificationCoverage.verified`. Synthetic successful results are recorded in `simulated` or `fixture` coverage and cannot satisfy required production policy.
+
+The default policy blocks required failures and high/critical findings, requests changes for unsupported required capabilities or required non-real execution, and requests review for medium findings. With no blocking condition, incomplete or synthetic coverage produces `partial`; complete successful real required coverage produces `pass`. An explicit check-result infrastructure error maps to result status `error`, which has precedence over policy outcomes. Result and evidence content hashes exclude `createdAt` and include execution source where it affects meaning.
 
 AI reasoning is an optional interpretation layer. Its confidence describes the provider's confidence in an interpretation, not truth probability. AI claims require references to existing evidence and use explicit AI provenance. Provider output is validated before use; repository text is untrusted data, and contradictions with deterministic facts are recorded without changing those facts.
+
+Batch 8.1 closes the dogfood distinction gap internally. Detection and planning remain separate from execution; `simulated` and `fixture` are explicit non-production sources, while `real` is assigned at the sandbox execution boundary. The public `verify-contracts` schemas do not yet expose execution provenance, so this semantic distinction remains internal until a future versioned contract decision.
 
 ## Provenance and public mapping
 

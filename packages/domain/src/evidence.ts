@@ -1,4 +1,5 @@
 import type { EvidenceId } from "./identifiers.js";
+import type { ExecutionSource } from "./checks.js";
 import type { Provenance } from "./provenance.js";
 
 export interface Evidence {
@@ -10,4 +11,5 @@ export interface Evidence {
   readonly producer: Provenance;
   readonly createdAt: string;
   readonly contentHash: string;
+  readonly executionSource: ExecutionSource;
 }

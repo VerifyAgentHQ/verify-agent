@@ -35,6 +35,7 @@ function checkResult(
     contentHash: "b".repeat(64),
     createdAt: "2026-08-31T10:00:00Z",
     producer: { type: "deterministic_tool", name: "fixture", version: "1.0.0" },
+    executionSource: "fixture",
   };
 }
 
@@ -50,6 +51,8 @@ describe("deterministic evidence and findings", () => {
     ]);
     expect(first.contentHash).toMatch(/^[a-f0-9]{64}$/);
     expect(first.value).not.toHaveProperty("createdAt");
+    expect(first.executionSource).toBe("fixture");
+    expect(first.value).toMatchObject({ executionSource: "fixture" });
   });
 
   it.each([
@@ -66,6 +69,7 @@ describe("deterministic evidence and findings", () => {
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({ severity, status: "open" });
       expect(findings[0].evidenceReferences).toEqual([evidence.id]);
+      expect(evidence.executionSource).toBe("fixture");
     },
   );
 
@@ -90,6 +94,7 @@ describe("deterministic evidence and findings", () => {
       policy,
       requiredCheckIds: [result.checkId],
       unsupportedRequiredCapabilities: [],
+      nonRealRequiredCheckIds: [],
       createdAt: "2026-08-31T10:01:00Z",
     };
     const first = evaluateDefaultPolicy(context);
@@ -109,6 +114,7 @@ describe("deterministic evidence and findings", () => {
       policy,
       requiredCheckIds: [],
       unsupportedRequiredCapabilities: ["rust.clippy"],
+      nonRealRequiredCheckIds: [],
       createdAt: "2026-08-31T10:01:00Z",
     });
     expect(decision.outcome).toBe("needs_changes");

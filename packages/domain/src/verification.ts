@@ -77,4 +77,7 @@ export interface VerificationCoverage {
   readonly partial: readonly string[];
   readonly unsupported: readonly string[];
   readonly notApplicable: readonly string[];
+  /** Internal categories only; synthetic results never count as verified. */
+  readonly simulated: readonly string[];
+  readonly fixture: readonly string[];
 }

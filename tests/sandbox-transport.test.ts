@@ -124,6 +124,15 @@ describe("sandbox transport boundary", () => {
     expect(response).toMatchObject({ status: "completed", exitCode: 0 });
   });
 
+  it("rejects a transport that omits execution provenance", () => {
+    const incomplete = {
+      execute: async () => ({}) as unknown,
+    } as never;
+    expect(() => createSandboxExecutorFromTransport(incomplete)).toThrow(
+      "must explicitly declare execution provenance",
+    );
+  });
+
   it("rejects malformed, oversized, timed-out, and cancelled subprocess responses", async () => {
     await expect(
       processTransport().execute({ ...request, snapshot: "malformed" }),

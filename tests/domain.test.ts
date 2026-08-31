@@ -70,6 +70,8 @@ describe("domain validation", () => {
         partial: [],
         unsupported: [],
         notApplicable: [],
+        simulated: [],
+        fixture: [],
       },
       checkResults: [],
       evidenceReferences: [],
@@ -110,6 +112,7 @@ describe("domain validation", () => {
         name: "typescript",
         version: "5.0.0",
       },
+      executionSource: "real",
     });
     validateEvidence({
       id: evidenceId,
@@ -120,6 +123,7 @@ describe("domain validation", () => {
       producer: { type: "deterministic_tool", name: "typescript" },
       createdAt: "2026-08-31T10:00:00Z",
       contentHash,
+      executionSource: "fixture",
     });
     validateFinding({
       id: id<"FindingId">("finding-1"),
@@ -181,6 +185,8 @@ describe("domain validation", () => {
           partial: [],
           unsupported: ["rust.test"],
           notApplicable: [],
+          simulated: [],
+          fixture: [],
         }),
     ],
     [
@@ -234,6 +240,8 @@ describe("domain validation", () => {
             partial: [],
             unsupported: [],
             notApplicable: [],
+            simulated: [],
+            fixture: [],
           },
           checkResults: [],
           evidenceReferences: [],
@@ -284,6 +292,7 @@ describe("domain validation", () => {
           contentHash,
           createdAt: "2026-08-31T10:00:00Z",
           producer: { type: "system", name: "verify-agent" },
+          executionSource: "fixture",
         }),
     ],
   ])("rejects %s", (_, operation) => {

@@ -172,6 +172,10 @@ export function mapSandboxJobResultToCheckResult(
   execution: CheckExecution,
   sandboxResult: SandboxJobResult,
 ): CheckResult {
+  if (!execution.executionSource)
+    throw new Error(
+      "check execution provenance is required before result mapping",
+    );
   if (sandboxResult.jobId !== execution.jobId)
     throw new Error("sandbox result job does not match check execution");
   if (
@@ -194,6 +198,7 @@ export function mapSandboxJobResultToCheckResult(
     rawOutputRef: sandboxResult.logsRef,
     artifactRefs: sandboxResult.artifactRefs,
     inputHash: execution.inputsHash,
+    executionSource: execution.executionSource,
   };
   const result: CheckResult = {
     id: brandId<"CheckResultId">(request.resultId),
@@ -216,6 +221,7 @@ export function createFakeSandboxExecutor(
 ): SandboxExecutor & { readonly requests: readonly SandboxJobRequest[] } {
   const requests: SandboxJobRequest[] = [];
   return {
+    executionSource: "simulated" as const,
     requests,
     async execute(request) {
       requests.push(request);
@@ -236,7 +242,11 @@ export function createCheckExecutor(
           `No trusted execution specification: ${String(request.definition.id)}`,
         );
       const inputHash = createExecutionInputHash(request, spec);
-      const queued = { ...request.execution, inputsHash: inputHash };
+      const queued = {
+        ...request.execution,
+        inputsHash: inputHash,
+        executionSource: sandbox.executionSource,
+      };
       validateCheckExecution(queued);
       const sandboxRequest = mapCheckExecutionToSandboxJobRequest(
         { ...request, execution: queued },

@@ -115,6 +115,7 @@ function result(
     contentHash: "b".repeat(64),
     createdAt: "2026-08-31T10:00:00Z",
     producer: { type: "deterministic_tool", name: "fixture", version: "1.0.0" },
+    executionSource: "fixture",
   };
 }
 
@@ -153,8 +154,9 @@ describe("deterministic verification result aggregation", () => {
     const output = aggregate([
       result("result-ts", "typescript.typecheck", "passed"),
     ]);
-    expect(output.result.status).toBe("partial");
-    expect(output.result.coverage.verified).toEqual(["typescript.typecheck"]);
+    expect(output.result.status).toBe("needs_changes");
+    expect(output.result.coverage.verified).toEqual([]);
+    expect(output.result.coverage.fixture).toEqual(["typescript.typecheck"]);
     expect(output.result.coverage.partial).toEqual([
       "rust.test",
       "typescript.lint",
@@ -206,5 +208,30 @@ describe("deterministic verification result aggregation", () => {
     ]);
     expect(output.policyDecision.outcome).toBe("block");
     expect(output.result.status).toBe("error");
+  });
+
+  it("does not treat simulated required success as production verification", () => {
+    const simulated = {
+      ...result("result-simulated", "typescript.typecheck", "passed"),
+      executionSource: "simulated" as const,
+    };
+    const output = aggregate([simulated]);
+    expect(output.result.coverage.verified).toEqual([]);
+    expect(output.result.coverage.simulated).toEqual(["typescript.typecheck"]);
+    expect(output.policyDecision.outcome).toBe("needs_changes");
+    expect(output.result.status).toBe("needs_changes");
+    expect(output.policyDecision.triggeredRuleIds).toContain(
+      "non-real-required-execution",
+    );
+  });
+
+  it("allows only real successful execution into verified coverage", () => {
+    const real = {
+      ...result("result-real", "typescript.typecheck", "passed"),
+      executionSource: "real" as const,
+    };
+    const output = aggregate([real]);
+    expect(output.result.coverage.verified).toEqual(["typescript.typecheck"]);
+    expect(output.result.status).toBe("partial");
   });
 });

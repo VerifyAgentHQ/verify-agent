@@ -132,6 +132,7 @@ describe("check execution orchestration", () => {
     expect(fake.requests).toHaveLength(1);
     expect(outcome.execution.status).toBe("completed");
     expect(outcome.result.status).toBe("passed");
+    expect(outcome.result.executionSource).toBe("simulated");
     expect(outcome.result.producer.type).toBe("system");
   });
 

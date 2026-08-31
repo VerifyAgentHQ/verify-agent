@@ -24,6 +24,14 @@ const policy: Policy = {
   version: POLICY_VERSION,
   rules: [
     {
+      ruleId: "non-real-required-execution",
+      condition: "a required check result is simulated or fixture-based",
+      action: "needs_changes",
+      priority: 25,
+      description:
+        "Synthetic execution cannot satisfy required production verification coverage.",
+    },
+    {
       ruleId: "required-check-failure",
       condition:
         "required check status is failed, timed_out, error, or cancelled",
@@ -103,6 +111,10 @@ export function evaluateDefaultPolicy(
   if (severeFindings.length > 0) {
     outcome = "block";
     triggeredRuleIds.push("high-finding");
+  }
+  if (outcome !== "block" && context.nonRealRequiredCheckIds.length > 0) {
+    outcome = "needs_changes";
+    triggeredRuleIds.push("non-real-required-execution");
   }
   if (
     outcome !== "block" &&

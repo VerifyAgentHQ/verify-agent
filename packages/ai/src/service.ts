@@ -161,6 +161,7 @@ export function buildAiPrompt(
     summary: item.summary,
     value: item.value,
     sourceReferences: item.sourceReferences,
+    executionSource: item.executionSource,
   }));
   const findings = input.findings.map((item) => ({
     id: item.id,

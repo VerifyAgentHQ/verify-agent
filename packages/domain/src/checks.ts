@@ -23,6 +23,9 @@ export interface CheckDefinition {
 export type CheckExecutionStatus =
   "queued" | "running" | "completed" | "failed" | "timed_out" | "cancelled";
 
+/** The execution source is semantic provenance, not a claim inferred from a test helper. */
+export type ExecutionSource = "real" | "simulated" | "fixture";
+
 export interface CheckExecution {
   readonly id: CheckExecutionId;
   readonly checkDefinitionId: CheckId;
@@ -32,6 +35,7 @@ export interface CheckExecution {
   readonly startedAt?: string;
   readonly completedAt?: string;
   readonly status: CheckExecutionStatus;
+  readonly executionSource?: ExecutionSource;
 }
 
 export type CheckStatus =
@@ -54,4 +58,5 @@ export interface CheckResult {
   readonly contentHash: string;
   readonly createdAt: string;
   readonly producer: Provenance;
+  readonly executionSource: ExecutionSource;
 }

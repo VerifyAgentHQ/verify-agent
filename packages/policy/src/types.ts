@@ -14,6 +14,7 @@ export interface PolicyDecisionContext {
   policy: Policy;
   readonly requiredCheckIds: readonly CheckId[];
   readonly unsupportedRequiredCapabilities: readonly string[];
+  readonly nonRealRequiredCheckIds: readonly CheckId[];
   readonly createdAt: string;
 }
 
