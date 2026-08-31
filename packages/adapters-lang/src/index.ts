@@ -1,5 +1,20 @@
 export type {
+  DetectionConfidence,
+  DetectionContext,
+  DetectionObservation,
   LanguageAdapter,
-  LanguageDetectionResult,
-  ProjectDetectionContext,
+  LanguageDetector,
+  ProjectDetectionResult,
+  ProjectDetectionService,
+  SupportedLanguage,
 } from "./types.js";
+export {
+  createFileSystemDetectionContext,
+  createMemoryDetectionContext,
+} from "./context.js";
+export {
+  defaultLanguageDetectors,
+  rustDetector,
+  typescriptDetector,
+} from "./detectors.js";
+export { createProjectDetectionService } from "./service.js";
