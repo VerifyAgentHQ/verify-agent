@@ -54,7 +54,7 @@ This means domain entities and engine orchestration avoid importing GitHub, AI-p
 - Source adapters satisfy the `SourceProvider` contract and provide repository metadata, source state, and change data.
 - Language adapters satisfy `LanguageAdapter` and provide project detection and ecosystem capabilities.
 - The engine depends on stable interfaces instead of concrete provider code.
-- The sandbox boundary is expressed as an internal `SandboxExecutor` interface; execution details remain outside this repository.
+- The sandbox boundary is expressed as an internal `SandboxExecutor` interface; execution details remain outside this repository. The opt-in real process adapter is configured with the trusted `VERIFY_SANDBOX_PROCESS` executable path and never falls back to a fake transport.
 
 ### Check execution boundary
 
@@ -110,6 +110,10 @@ This repository consumes public contract definitions from the sibling repository
 ### `verify-sandbox`
 
 The sandbox is an external execution boundary. This repository communicates with it through `SandboxTransport` using the approved request/result contract, never by importing sandbox implementation code or calling Docker directly. The local adapter launches a trusted configured sandbox process using one JSON document per line; it does not provide sandbox isolation itself.
+
+Batch 9 Part 1 validates this boundary with an optional integration test. When configured, the child receives an explicitly empty environment, structured JSON-line input, bounded messages, and real provenance. If the process or Docker backend is unavailable, the result remains a real-source error or the test is skipped; it is never downgraded to simulation.
+
+Batch 9 Part 2 validated the configured Windows process path against the locally built `verify-sandbox` `verify-sandbox-process` binary. The process handshake returned a protocol-compatible real-source response; Docker was unavailable on the development host, so no container command was executed and no success was claimed. The sandbox source tree was not changed.
 
 ### Future GitHub / AI / GOAT boundaries
 

@@ -122,6 +122,9 @@ describe("sandbox transport boundary", () => {
     const response =
       await createSandboxExecutorFromTransport(fake).execute(internalRequest);
     expect(response).toMatchObject({ status: "completed", exitCode: 0 });
+    expect(createSandboxExecutorFromTransport(fake).executionSource).toBe(
+      "simulated",
+    );
   });
 
   it("rejects a transport that omits execution provenance", () => {

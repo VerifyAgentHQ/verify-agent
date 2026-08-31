@@ -44,6 +44,10 @@ Sandbox status and check status remain distinct: a completed zero exit code pass
 
 The current `EXECUTE` stage is an application-side boundary, not a claim that VerifyAgent owns isolation. Tests use an in-memory fake transport and a deterministic protocol harness; no repository code, package manager, Cargo process, Docker runtime, or real target repository is invoked. The sibling `verify-sandbox` process entrypoint is compatible with this transport when supplied through trusted configuration; Docker-backed integration is intentionally separate from the normal suite.
 
+Batch 9 Part 1 provides an opt-in real-process handshake through `VERIFY_SANDBOX_PROCESS`. The configured executable is launched directly without a shell and receives no ambient host environment. A missing executable skips only the dedicated integration test; it does not select a fake transport. A started process that reports Docker/backend unavailability remains `real` provenance with an infrastructure error and cannot contribute to verified coverage.
+
+Batch 9 Part 2 built the sandbox process from the sibling workspace and exercised the real VerifyAgent transport path. Docker was not installed/available, so the sandbox process could not create a container; this is a real infrastructure-error condition, not simulated or verified execution. No Stellar Forge command was run.
+
 ## Deterministic result boundary
 
 After check execution, Batch 6 normalizes each factual `CheckResult` into immutable `Evidence`, derives only evidence-backed `Finding` objects, evaluates the default versioned policy, and assembles an immutable `VerificationResult`. Failed, timed-out, errored, and cancelled checks create high-severity findings; skipped checks create no finding and contribute to partial coverage. Cancellation is therefore explicit and does not silently disappear.
