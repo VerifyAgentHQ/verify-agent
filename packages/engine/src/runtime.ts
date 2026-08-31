@@ -6,19 +6,10 @@ import type { VerificationOrchestrator } from "./interfaces.js";
 
 export function createEngine(): VerificationOrchestrator {
   return {
-    async run(request: VerificationRequest): Promise<VerificationResult> {
-      return {
-        id: `verification-${request.id}`,
-        requestId: request.id,
-        jobId: `job-${request.id}`,
-        status: "needs-review",
-        createdAt: new Date().toISOString(),
-        producedAt: new Date().toISOString(),
-        findings: [],
-        evidence: [],
-        summary:
-          "Phase 0 orchestration boundary is initialized; full verification logic is intentionally deferred.",
-      };
+    async run(_request: VerificationRequest): Promise<VerificationResult> {
+      throw new Error(
+        "Verification orchestration is not implemented in Phase 1 Batch 1",
+      );
     },
   };
 }

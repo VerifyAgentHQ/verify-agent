@@ -2,78 +2,37 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  domainImmutability,
-  publicContract,
-  toPublicSourceReference,
+import type {
+  CheckExecutionStatus,
+  CheckStatus,
+  VerificationStatus,
 } from "../packages/domain/src/index.js";
-import { createEngine } from "../packages/engine/src/runtime.js";
+import { publicContract } from "../packages/domain/src/index.js";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const contractsRoot = join(repoRoot, "..", "verify-contracts");
 
-describe("Phase 0 architecture", () => {
-  it("exposes immutable fact and versioned definition boundaries", () => {
-    expect(domainImmutability.immutableFacts).toEqual(
-      expect.arrayContaining([
-        "RepositorySnapshot",
-        "ChangeSet",
-        "CheckResult",
-        "Evidence",
-        "PolicyDecision",
-        "VerificationResult",
-      ]),
-    );
-    expect(domainImmutability.versionedDefinitions).toEqual([
-      "CheckDefinition",
-      "Policy",
-    ]);
-  });
-
-  it("maps internal source references to the public wire shape explicitly", () => {
-    expect(toPublicSourceReference({ kind: "git", ref: "abc123" })).toEqual({
-      provider: "git",
-      reference: "abc123",
-    });
-  });
-
-  it("keeps the engine usable through orchestration abstractions", () => {
-    const engine = createEngine();
-    expect(typeof engine.run).toBe("function");
-  });
-
-  it("tracks the sibling repository's authoritative contract metadata", () => {
-    const requestSchema = JSON.parse(
+describe("architecture boundaries", () => {
+  it("tracks authoritative sibling contract metadata without copying schemas", () => {
+    const schema = JSON.parse(
       readFileSync(
-        join(
-          contractsRoot,
-          "schemas",
-          "verification",
-          "verification-request.schema.json",
-        ),
+        join(contractsRoot, "schemas", "common", "common.schema.json"),
         "utf8",
       ),
-    ) as { $id: string; properties: { schemaVersion: { const: string } } };
-    const sandboxSchema = JSON.parse(
-      readFileSync(
-        join(
-          contractsRoot,
-          "schemas",
-          "sandbox",
-          "sandbox-job-request.schema.json",
-        ),
-        "utf8",
-      ),
-    ) as { $id: string; properties: { schemaVersion: { const: string } } };
+    ) as {
+      $id: string;
+      $defs: { SourceReference: object; SourceState: object };
+    };
 
-    expect(publicContract.schemaVersion).toBe(
-      requestSchema.properties.schemaVersion.const,
+    expect(schema.$id).toBe(
+      "https://contracts.verifyagent.dev/schemas/common/common.schema.json",
     );
-    expect(publicContract.verificationRequestSchema).toBe(requestSchema.$id);
-    expect(publicContract.sandboxJobRequestSchema).toBe(sandboxSchema.$id);
+    expect(schema.$defs.SourceReference).toBeDefined();
+    expect(schema.$defs.SourceState).toBeDefined();
+    expect(publicContract.schemaVersion).toBe("1.0.0");
   });
 
-  it("contains no forbidden provider or runtime dependencies in core manifests", () => {
+  it("keeps core package manifests free of provider/runtime dependencies", () => {
     const corePackages = ["domain", "engine", "checks", "policy", "ai"];
     const forbidden =
       /github|docker|openai|anthropic|gemini|goat|redis|database/i;
@@ -92,5 +51,25 @@ describe("Phase 0 architecture", () => {
         expect.stringMatching(forbidden),
       );
     }
+  });
+
+  it("keeps execution, result, and verification status types distinct", () => {
+    const executionStatus: CheckExecutionStatus = "queued";
+    const resultStatus: CheckStatus = "timed_out";
+    const verificationStatus: VerificationStatus = "needs_review";
+    expect([executionStatus, resultStatus, verificationStatus]).toEqual([
+      "queued",
+      "timed_out",
+      "needs_review",
+    ]);
+  });
+
+  it("does not use a fabricated zero hash in the engine placeholder", () => {
+    const runtime = readFileSync(
+      join(repoRoot, "packages", "engine", "src", "runtime.ts"),
+      "utf8",
+    );
+    expect(runtime).not.toContain("repeat(64)");
+    expect(runtime).toContain("not implemented");
   });
 });

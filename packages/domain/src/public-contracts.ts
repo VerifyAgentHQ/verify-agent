@@ -22,13 +22,13 @@ export interface PublicSourceState {
 }
 
 export function toPublicSourceReference(
-  source: import("./model.js").SourceReference,
+  source: import("./source.js").SourceReference,
 ): PublicSourceReference {
-  return { provider: source.kind, reference: source.ref };
+  return { provider: source.provider, reference: source.reference };
 }
 
 export function toPublicSourceState(
-  snapshot: import("./model.js").RepositorySnapshot,
+  snapshot: import("./source.js").RepositorySnapshot,
 ): PublicSourceState {
-  return { type: "commit", value: snapshot.revision };
+  return snapshot.sourceState;
 }

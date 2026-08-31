@@ -1,50 +1,67 @@
 # Domain model
 
-## Core principles
+The domain is deterministic, provider-independent, runtime-independent, and persistence-independent. Its implementation is split into focused modules under `packages/domain/src/`.
 
-The domain package is the semantic heart of VerifyAgent. It defines stable internal entities and preserves the separation between immutable facts and versioned definitions.
+## Entities
 
-## Immutable facts
+| Entity                            | Purpose                                                          | Semantics            |
+| --------------------------------- | ---------------------------------------------------------------- | -------------------- |
+| `Project`                         | Stable product identity and repository root                      | Reference data       |
+| `SourceReference` / `SourceState` | Provider-neutral source identity and exact commit/snapshot state | Read-only values     |
+| `RepositorySnapshot`              | Exact source state evaluated for a run                           | Immutable fact       |
+| `ChangeSet` / `ChangedFile`       | Normalized changes between source states                         | Immutable fact       |
+| `ProjectProfile`                  | Detection output for one snapshot                                | Immutable snapshot   |
+| `VerificationRequest`             | Requested scope, actor, mode, checks, and policy                 | Immutable request    |
+| `VerificationJob`                 | Lifecycle and attempt for a request                              | Immutable record     |
+| `CheckDefinition`                 | Versioned description of a check                                 | Versioned definition |
+| `CheckExecution`                  | Lifecycle of one check attempt                                   | Immutable record     |
+| `CheckResult`                     | Factual output from one execution                                | Immutable fact       |
+| `Evidence`                        | Traceable factual or derived observation                         | Immutable fact       |
+| `Finding` / `FindingLocation`     | Evidence-backed issue and source location                        | Immutable fact       |
+| `Policy` / `PolicyRule`           | Versioned policy definition                                      | Versioned definition |
+| `PolicyDecision`                  | Policy interpretation of evidence and findings                   | Immutable fact       |
+| `VerificationCoverage`            | Capability-oriented coverage categories                          | Immutable value      |
+| `VerificationResult`              | Final result for one request, job, and source state              | Immutable fact       |
 
-The following are historical facts that should not be silently mutated once recorded:
+## Identity and invariants
 
-- `RepositorySnapshot`
-- `ChangeSet`
-- `CheckResult`
-- `Evidence`
-- `PolicyDecision`
-- `VerificationResult`
+Branded IDs (`ProjectId`, `RepositorySnapshotId`, `ChangeSetId`, `VerificationId`, `VerificationRequestId`, `VerificationJobId`, `CheckId`, `CheckExecutionId`, `CheckResultId`, `EvidenceId`, `FindingId`, `PolicyId`, and `PolicyDecisionId`) prevent accidental identifier interchange at compile time. `brandId` applies the identifier character constraints without importing the public schema validator.
 
-These represent the evidence trail and should be treated as append-only by the system. A new commit or new run creates a new verification result rather than editing a prior fact.
+The `validate*` helpers enforce deterministic semantic rules:
 
-## Versioned definitions
+- required identifiers, names, references, summaries, and provenance are non-empty;
+- timestamps require ISO 8601 date-times with an explicit `Z` or numeric offset;
+- hashes are 64-character hexadecimal values and result versions are semantic versions;
+- source states are only `commit` or `snapshot`;
+- repository paths are normalized, relative, and cannot escape the repository;
+- counts, durations, lines, columns, priorities, and confidence values have valid ranges;
+- check execution, check result, finding, verification, and policy statuses are validated separately;
+- findings require evidence references;
+- coverage capabilities cannot occur in conflicting categories;
+- renamed/copied files require a safe previous path and locations have ordered ranges.
 
-These definitions are descriptive and evolve over time, with versioning and review:
+Validation is separate from public JSON Schema validation. `verify-contracts` owns wire compatibility; this package owns internal semantic invariants.
 
-- `CheckDefinition`
-- `Policy`
+## Traceability
 
-Versioned definitions may change by design, but the resulting evidence remains linked to the definition version that produced it.
+```text
+Project + SourceState
+        |
+RepositorySnapshot + ChangeSet
+        |
+VerificationRequest -> VerificationJob
+        |
+CheckDefinition -> CheckExecution -> CheckResult
+        |
+Evidence -> Finding
+        |
+Policy -> PolicyDecision
+        |
+VerificationResult
+```
 
-## Provenance
+`VerificationResult` identifies the request, job, project, snapshot, change set, check results, evidence, findings, and policy decision. A new source commit creates a new snapshot and result; historical facts expose no mutation or setter API.
 
-`Provenance` records the origin of a fact, the source of the data, and the relevant trace identifier. This is used to ensure traceability from the source repository state to the final result.
+## Provenance and public mapping
 
-## Result traceability
-
-The verification lifecycle should keep explicit relationships between:
-
-1. `VerificationRequest`
-2. `VerificationJob`
-3. `CheckExecution`
-4. `CheckResult`
-5. `Evidence`
-6. `Finding`
-7. `PolicyDecision`
-8. `VerificationResult`
-
-This chain allows a reviewer to trace a high-level verification result back to the underlying facts and definition versions.
-
-## Public vs internal model
-
-Public contracts in `verify-contracts` are stable wire-facing definitions. Internal models in this repository may evolve to support product needs, but those mappings must be explicit and version-aware. Public contract semantics remain canonical, while internal models are semantic representations for the product engine.
+`Provenance` records only a provider-neutral type, name, and optional version. `public-contracts.ts` maps internal source/reference and source-state values to the authoritative `verify-contracts` wire shapes. Schemas are not copied or re-exported as application types.
