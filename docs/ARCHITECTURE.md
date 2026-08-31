@@ -78,7 +78,7 @@ This repository consumes public contract definitions from the sibling repository
 
 ### `verify-sandbox`
 
-The sandbox is an external execution boundary. This repository communicates with it through `SandboxTransport` using the approved request/result contract, never by importing sandbox implementation code or calling Docker directly. The current local adapter uses a trusted subprocess configuration and one JSON document per line; it does not provide sandbox isolation itself.
+The sandbox is an external execution boundary. This repository communicates with it through `SandboxTransport` using the approved request/result contract, never by importing sandbox implementation code or calling Docker directly. The local adapter launches a trusted configured sandbox process using one JSON document per line; it does not provide sandbox isolation itself.
 
 ### Future GitHub / AI / GOAT boundaries
 

@@ -11,6 +11,10 @@ export type {
   SandboxStatus,
   ExecutionLimits,
   PublicSandboxJobRequest,
+  PublicSandboxJobResult,
+  SandboxTransport,
+  SandboxTransportEvent,
+  SandboxTransportObserver,
   CheckExecutionRequest,
   CheckExecutionOutcome,
   CheckExecutor,
@@ -36,3 +40,15 @@ export {
   validateSandboxJobResult,
 } from "./sandbox-transport.js";
 export type { SandboxProcessConfig } from "./sandbox-transport.js";
+export {
+  createDefaultVerificationPipeline,
+  createVerificationPipeline,
+  VerificationPipelineError,
+} from "./pipeline.js";
+export type {
+  ProjectDetectionPort,
+  VerificationPipeline,
+  VerificationPipelineDependencies,
+  VerificationPipelineInput,
+  VerificationPipelineOutput,
+} from "./pipeline.js";

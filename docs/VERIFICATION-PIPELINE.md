@@ -42,10 +42,10 @@ Planner configuration can require, optionally select, or disable checks. A confi
 
 Sandbox status and check status remain distinct: a completed zero exit code passes, a completed non-zero exit code fails, and timeout, cancellation, or sandbox errors retain their corresponding check status. Transport and protocol failures are rejected as infrastructure errors and never converted to a passing result.
 
-The current `EXECUTE` stage is an application-side boundary, not a claim that VerifyAgent owns isolation. Tests use an in-memory fake transport and a deterministic protocol harness; no repository code, package manager, Cargo process, Docker runtime, or real target repository is invoked. The sibling `verify-sandbox` repository currently does not expose a long-running process entrypoint, so connecting the local adapter to its real runner remains follow-up work outside this batch.
+The current `EXECUTE` stage is an application-side boundary, not a claim that VerifyAgent owns isolation. Tests use an in-memory fake transport and a deterministic protocol harness; no repository code, package manager, Cargo process, Docker runtime, or real target repository is invoked. The sibling `verify-sandbox` process entrypoint is compatible with this transport when supplied through trusted configuration; Docker-backed integration is intentionally separate from the normal suite.
 
 ## Later stages
 
 - `PLAN`: convert applicable profile capabilities into an explicit, explainable check plan. Implemented in Phase 1 Batch 3; it does not execute checks.
-- `EXECUTE`: application-side orchestration and transport boundary implemented in Batch 4 Part 3; the real `verify-sandbox` process/service connection remains pending because its current repository surface is library-oriented.
+- `EXECUTE`: application-side orchestration and transport boundary implemented in Batch 4 Part 3; the real sandbox process can be selected through trusted configuration, while Docker-backed integration remains separately gated.
 - `COLLECT`, `ANALYZE`, `POLICY`, and `RESULT`: assemble evidence, findings, decisions, and final results in later phases.
