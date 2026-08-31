@@ -26,3 +26,13 @@ export {
   toPublicSandboxJobRequest,
   transitionCheckExecution,
 } from "./execution.js";
+export {
+  FakeSandboxTransport,
+  SandboxProtocolError,
+  SandboxTransportError,
+  SubprocessSandboxTransport,
+  createSandboxExecutorFromTransport,
+  validateSandboxJobRequest,
+  validateSandboxJobResult,
+} from "./sandbox-transport.js";
+export type { SandboxProcessConfig } from "./sandbox-transport.js";

@@ -58,6 +58,24 @@ export interface PublicSandboxJobRequest {
   readonly artifactPolicy: "none" | "declared";
 }
 
+export type PublicSandboxJobResult = SandboxJobResult;
+
+export interface SandboxTransport {
+  execute(
+    request: PublicSandboxJobRequest,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+}
+
+export type SandboxTransportEvent =
+  | { readonly type: "request_started"; readonly jobId: string }
+  | { readonly type: "response_received"; readonly jobId: string }
+  | { readonly type: "transport_failure"; readonly jobId: string }
+  | { readonly type: "timeout"; readonly jobId: string }
+  | { readonly type: "cancelled"; readonly jobId: string };
+
+export type SandboxTransportObserver = (event: SandboxTransportEvent) => void;
+
 export interface SandboxJobResult {
   readonly schemaVersion: typeof publicContract.schemaVersion;
   readonly jobId: string;

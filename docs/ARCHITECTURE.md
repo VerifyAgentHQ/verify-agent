@@ -58,7 +58,7 @@ This means domain entities and engine orchestration avoid importing GitHub, AI-p
 
 ### Check execution boundary
 
-`packages/checks` owns trusted, structured execution specifications for catalogued checks. `packages/engine` maps a queued `CheckExecution` to an internal sandbox request and delegates through `SandboxExecutor`:
+`packages/checks` owns trusted, structured execution specifications for catalogued checks. `packages/engine` maps a queued `CheckExecution` to an internal sandbox request and delegates through `SandboxExecutor` and `SandboxTransport`:
 
 ```text
 CheckExecutor
@@ -68,7 +68,7 @@ SandboxExecutor interface
 future verify-sandbox implementation
 ```
 
-Batch 4 Part 1 provides application-side orchestration and an in-memory fake for tests only. It does not execute commands, invoke Docker, or implement the sandbox runtime.
+Batch 4 Part 1 provides application-side orchestration; Batch 4 Part 3 adds the transport boundary and a bounded local subprocess adapter. VerifyAgent still does not execute commands itself, invoke Docker, or implement sandbox isolation.
 
 ## External boundaries
 
@@ -78,7 +78,7 @@ This repository consumes public contract definitions from the sibling repository
 
 ### `verify-sandbox`
 
-The sandbox is an external execution boundary. This repository communicates with it via the approved contract and a narrow interface, never by importing sandbox implementation code or calling Docker directly.
+The sandbox is an external execution boundary. This repository communicates with it through `SandboxTransport` using the approved request/result contract, never by importing sandbox implementation code or calling Docker directly. The current local adapter uses a trusted subprocess configuration and one JSON document per line; it does not provide sandbox isolation itself.
 
 ### Future GitHub / AI / GOAT boundaries
 
