@@ -50,6 +50,10 @@ After check execution, Batch 6 normalizes each factual `CheckResult` into immuta
 
 The default policy maps required failures and high/critical findings to `block`, unsupported required capabilities to `needs_changes`, and medium findings to `needs_review`. If policy allows but applicable capabilities remain unchecked, the result is `partial`; otherwise it is `pass`. An infrastructure `CheckResult` error maps to result `error` above policy outcome. Content hashes exclude timestamps and are based on canonical stable references and facts.
 
+## Optional AI reasoning
+
+Batch 7 adds an explicit `AiReasoningService` after deterministic evidence. It supports only scope alignment, failure relevance, architecture consistency, finding prioritization, and summary tasks. Inputs are bounded and split into trusted task instructions versus untrusted repository-derived context. Structured outputs must identify the task, rationale, confidence, provider, and existing evidence references. AI confidence never overrides deterministic status, and contradictory interpretations are returned as inspectable conflicts. AI is not called automatically by the deterministic pipeline and no provider or network is required for normal operation.
+
 ## Later stages
 
 - `PLAN`: convert applicable profile capabilities into an explicit, explainable check plan. Implemented in Phase 1 Batch 3; it does not execute checks.

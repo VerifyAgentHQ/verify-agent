@@ -66,6 +66,8 @@ VerificationResult
 
 The default policy blocks required failures and high/critical findings, requests changes for unsupported required capabilities, and requests review for medium findings. With no blocking condition, incomplete coverage produces `partial`; complete successful required coverage produces `pass`. An explicit check-result infrastructure error maps to result status `error`, which has precedence over policy outcomes. Result and evidence content hashes exclude `createdAt`.
 
+AI reasoning is an optional interpretation layer. Its confidence describes the provider's confidence in an interpretation, not truth probability. AI claims require references to existing evidence and use explicit AI provenance. Provider output is validated before use; repository text is untrusted data, and contradictions with deterministic facts are recorded without changing those facts.
+
 ## Provenance and public mapping
 
 `Provenance` records only a provider-neutral type, name, and optional version. `public-contracts.ts` maps internal source/reference and source-state values to the authoritative `verify-contracts` wire shapes. Schemas are not copied or re-exported as application types.

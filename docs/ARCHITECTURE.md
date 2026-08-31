@@ -88,6 +88,17 @@ VerificationResult
 
 Evidence and findings are deterministic, traceable facts. Policy interprets those facts but cannot rewrite check results. The Batch 6 default evaluator is provider-independent and does not call AI or execute code.
 
+### Optional AI reasoning boundary
+
+AI is an optional semantic interpreter after deterministic evidence exists:
+
+```text
+CheckResults[] → Evidence → ┬→ deterministic Findings ─┐
+                            └→ optional AI Reasoning ───┴→ Policy → VerificationResult
+```
+
+`packages/ai` accepts bounded context and evidence, labels repository-derived content as untrusted, validates structured provider output, and records deterministic/AI conflicts. It cannot rewrite `CheckResult`, evidence, or deterministic findings. No provider SDK is installed; provider failures do not invalidate deterministic verification by default.
+
 ## External boundaries
 
 ### `verify-contracts`
