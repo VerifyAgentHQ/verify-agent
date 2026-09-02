@@ -72,6 +72,58 @@ AI reasoning is an optional interpretation layer. Its confidence describes the p
 
 Batch 8.1 closes the dogfood distinction gap internally. Detection and planning remain separate from execution; `simulated` and `fixture` are explicit non-production sources, while `real` is assigned at the sandbox execution boundary. The public `verify-contracts` schemas do not yet expose execution provenance, so this semantic distinction remains internal until a future versioned contract decision.
 
+Dependency artifact identity also records the operating system and CPU architecture. Provisioning rejects artifacts incompatible with the configured runner, and Linux package launchers containing Windows drive or UNC paths are rejected rather than rewritten.
+
 ## Provenance and public mapping
 
 `Provenance` records only a provider-neutral type, name, and optional version. `public-contracts.ts` maps internal source/reference and source-state values to the authoritative `verify-contracts` wire shapes. Schemas are not copied or re-exported as application types.
+
+## Dependency environments
+
+Dependency provisioning is represented internally by immutable
+`DependencyIdentityInput`, `DependencyArtifact`, `DependencyProvisioningRequest`,
+and `DependencyEnvironment` values. An artifact identity includes the exact
+repository snapshot, manifest and lockfile hashes, ecosystem, package-manager and
+toolchain versions, provisioning configuration, and generated-artifact inputs.
+Its semantic hash excludes timestamps and machine-specific ambient state.
+
+The current proof supports an explicit offline-capable pnpm artifact. The
+`PnpmDependencyArtifactBuilder` runs only in a trusted operator-controlled
+build root, installs from the submitted manifest/lockfile with frozen-lockfile
+and `--ignore-scripts`, and stores a dereferenced `node_modules` artifact. The
+runtime provisioner never installs packages or executes lifecycle scripts.
+`network_required` and `unavailable` artifacts are rejected in offline mode,
+and artifact paths are confined to the trusted store with symlinks and
+traversal rejected. Dependency provenance is distinct from
+`CheckResult.executionSource`; it cannot upgrade a fixture or simulated
+execution to `real`.
+
+Artifact identity is a canonical SHA-256 over snapshot, manifest and lockfile
+hashes, ecosystem, package-manager/version, toolchain, provisioning
+configuration, and generated-artifact inputs. A separate artifact content hash
+detects tampering before provisioning. Build-time network, when explicitly
+enabled by the trusted operator, is not runtime network: execution consumes
+only the built artifact with network disabled.
+
+Stellar Forge demonstrated that generated project state can be a check prerequisite:
+its root `next-env.d.ts` imports `.next/types`, while its dependencies are separate
+from source. Generated artifacts therefore belong in the dependency-environment
+identity and must be provisioned explicitly in a future implementation. The
+current builder records generated inputs but does not create framework output
+such as `.next/types`.
+
+Batch 12 adds an internal `ExecutionEnvironment` boundary. It links a source
+snapshot to an optional provisioned `DependencyEnvironment`, generated
+artifact descriptors, and a stable environment identity. `CheckExecution`
+records the dependency artifact identity, so changing dependency state changes
+execution identity without changing `ExecutionSource`. Provisioning has
+explicit `not_started`, `provisioning`, `ready`, and `failed` lifecycle
+semantics; failures stop before sandbox execution.
+
+Generated artifacts are separate immutable descriptors with a requirement,
+input hash, output content hash, source snapshot, output paths, and producer.
+The `PrebuiltGeneratedArtifactPreparer` is the current safe strategy: trusted
+operator configuration selects a prebuilt artifact, while repository metadata
+cannot select host paths or commands. Materialization is bounded and rejects
+unsafe paths and symlinks. Generated artifacts do not become dependency state
+or check results.

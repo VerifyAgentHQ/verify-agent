@@ -24,7 +24,11 @@ import type {
   CheckExecutor,
   CheckExecutionOutcome,
   ExecutionLimits,
+  DependencyProvisioningPort,
+  ExecutionEnvironment,
+  ProvisioningStatus,
 } from "./interfaces.js";
+import type { GeneratedArtifactPreparer } from "./generated-artifacts.js";
 import { DEFAULT_EXECUTION_LIMITS } from "./interfaces.js";
 import { brandId } from "@verify-agent/domain";
 
@@ -48,6 +52,12 @@ export interface VerificationPipelineInput {
   readonly executionId: string;
   readonly resultId: string;
   readonly createdAt: string;
+  readonly dependencyProvisioning?: {
+    readonly request: import("@verify-agent/domain").DependencyProvisioningRequest;
+    readonly destination: string;
+  };
+  readonly generatedArtifactRequirements?: readonly import("@verify-agent/domain").GeneratedArtifactRequirement[];
+  readonly generatedArtifactDestination?: string;
 }
 
 export interface VerificationPipelineOutput {
@@ -60,10 +70,15 @@ export interface VerificationPipelineOutput {
   readonly execution: CheckExecutionOutcome["execution"];
   readonly sandboxRequest: CheckExecutionOutcome["request"];
   readonly checkResult: CheckExecutionOutcome["result"];
+  readonly executionEnvironment?: ExecutionEnvironment;
+  readonly provisioningStatus: ProvisioningStatus;
 }
 
 export type VerificationPipelineErrorCode =
-  "detection_failed" | "no_applicable_check" | "execution_failed";
+  | "detection_failed"
+  | "no_applicable_check"
+  | "dependency_provisioning_failed"
+  | "execution_failed";
 
 export class VerificationPipelineError extends Error {
   constructor(
@@ -83,6 +98,7 @@ function stableHash(value: unknown): string {
 function createInitialExecution(
   input: VerificationPipelineInput,
   item: CheckPlanItem,
+  environment?: ExecutionEnvironment,
 ): CheckExecution {
   return {
     id: brandId<"CheckExecutionId">(input.executionId),
@@ -94,8 +110,13 @@ function createInitialExecution(
       changeSetId: input.changeSet.id,
       checkId: item.checkId,
       checkVersion: item.checkVersion,
+      dependencyArtifactId: environment?.dependencyEnvironment?.artifactId,
+      environmentIdentity: environment?.identityHash,
     }),
     status: "queued",
+    ...(environment?.dependencyEnvironment?.artifactId === undefined
+      ? {}
+      : { dependencyArtifactId: environment.dependencyEnvironment.artifactId }),
   };
 }
 
@@ -107,6 +128,8 @@ export interface VerificationPipelineDependencies {
   readonly detector: ProjectDetectionPort;
   readonly planner?: CheckPlanner;
   readonly executor: CheckExecutor;
+  readonly dependencyProvisioner?: DependencyProvisioningPort;
+  readonly generatedArtifactPreparer?: GeneratedArtifactPreparer;
 }
 
 export function createVerificationPipeline(
@@ -147,6 +170,92 @@ export function createVerificationPipeline(
           "execution_failed",
           `No definition for planned check: ${String(selectedItem.checkId)}`,
         );
+      let executionEnvironment: ExecutionEnvironment | undefined;
+      let provisioningStatus: ProvisioningStatus = "not_started";
+      if (input.dependencyProvisioning) {
+        if (!dependencies.dependencyProvisioner)
+          throw new VerificationPipelineError(
+            "dependency_provisioning_failed",
+            "Dependency provisioning was requested but no provisioner is configured",
+          );
+        provisioningStatus = "provisioning";
+        try {
+          const dependencyEnvironment =
+            await dependencies.dependencyProvisioner.provision(
+              input.dependencyProvisioning.request,
+              input.dependencyProvisioning.destination,
+            );
+          executionEnvironment = Object.freeze({
+            sourceSnapshotId: input.snapshot.id,
+            dependencyEnvironment,
+            generatedArtifacts: Object.freeze([]),
+            identityHash: stableHash({
+              sourceSnapshotId: input.snapshot.id,
+              dependencyArtifactId: dependencyEnvironment.artifactId,
+              dependencyContentHash: dependencyEnvironment.contentHash,
+              generatedArtifacts: [],
+            }),
+          });
+          provisioningStatus = "ready";
+        } catch (error) {
+          provisioningStatus = "failed";
+          throw new VerificationPipelineError(
+            "dependency_provisioning_failed",
+            "Dependency provisioning failed",
+            error,
+          );
+        }
+      }
+      const requirements = input.generatedArtifactRequirements ?? [];
+      if (requirements.length > 0 && !dependencies.generatedArtifactPreparer)
+        throw new VerificationPipelineError(
+          "dependency_provisioning_failed",
+          "Generated artifact preparation was requested but no preparer is configured",
+        );
+      if (requirements.length > 0 && !input.generatedArtifactDestination)
+        throw new VerificationPipelineError(
+          "dependency_provisioning_failed",
+          "Generated artifact destination is required",
+        );
+      if (requirements.length > 0) {
+        provisioningStatus = "provisioning";
+        try {
+          const baseEnvironment: ExecutionEnvironment =
+            executionEnvironment ??
+            (Object.freeze({
+              sourceSnapshotId: input.snapshot.id,
+              generatedArtifacts: Object.freeze([]),
+              identityHash: stableHash({ sourceSnapshotId: input.snapshot.id }),
+            }) as ExecutionEnvironment);
+          const generatedArtifacts = [];
+          for (const requirement of requirements) {
+            generatedArtifacts.push(
+              await dependencies.generatedArtifactPreparer!.prepare(
+                requirement,
+                baseEnvironment,
+                input.generatedArtifactDestination!,
+              ),
+            );
+          }
+          executionEnvironment = Object.freeze({
+            ...baseEnvironment,
+            generatedArtifacts: Object.freeze(generatedArtifacts),
+            identityHash: stableHash({
+              sourceSnapshotId: baseEnvironment.sourceSnapshotId,
+              dependencyEnvironment: baseEnvironment.dependencyEnvironment,
+              generatedArtifacts,
+            }),
+          });
+          provisioningStatus = "ready";
+        } catch (error) {
+          provisioningStatus = "failed";
+          throw new VerificationPipelineError(
+            "dependency_provisioning_failed",
+            "Generated artifact preparation failed",
+            error,
+          );
+        }
+      }
       let outcome: CheckExecutionOutcome;
       try {
         outcome = await dependencies.executor.execute({
@@ -155,10 +264,15 @@ export function createVerificationPipeline(
           snapshot: input.snapshot,
           planItem: selectedItem,
           definition,
-          execution: createInitialExecution(input, selectedItem),
+          execution: createInitialExecution(
+            input,
+            selectedItem,
+            executionEnvironment,
+          ),
           resultId: input.resultId,
           createdAt: input.createdAt,
           limits: input.executionLimits ?? DEFAULT_EXECUTION_LIMITS,
+          executionEnvironment,
         });
       } catch (error) {
         throw new VerificationPipelineError(
@@ -177,6 +291,8 @@ export function createVerificationPipeline(
         execution: outcome.execution,
         sandboxRequest: outcome.request,
         checkResult: outcome.result,
+        executionEnvironment,
+        provisioningStatus,
       };
     },
   };

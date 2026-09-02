@@ -186,4 +186,82 @@ describe("first end-to-end verification pipeline", () => {
     expect(first.checkResult).toEqual(second.checkResult);
     expect(first.plan.contentHash).toBe(second.plan.contentHash);
   });
+
+  it("provisions the execution environment before execution and carries its identity", async () => {
+    const { pipeline: service, transport } = pipeline(result);
+    const artifact = {
+      artifactId: "dependency-fixture",
+      sourceSnapshotId: snapshot.id,
+      ecosystem: "node" as const,
+      packageManager: "pnpm",
+      packageManagerVersion: "11.21.0",
+      toolchainVersion: "node-24.19.0",
+      platform: { operatingSystem: "linux", architecture: "amd64" },
+      manifestHash: "a".repeat(64),
+      lockfileHash: "b".repeat(64),
+      generatedArtifactInputs: [],
+      availability: "offline_capable" as const,
+      contentHash: "c".repeat(64),
+      producer: { type: "system" as const, name: "fixture" },
+    };
+    const environment = {
+      artifactId: artifact.artifactId,
+      contentHash: artifact.contentHash,
+      sourceSnapshotId: snapshot.id,
+      availability: "offline_capable" as const,
+      generatedArtifactInputs: [],
+      producer: artifact.producer,
+    };
+    const output = await createVerificationPipeline({
+      detector: createProjectDetectionService(),
+      executor: createCheckExecutor(
+        createSandboxExecutorFromTransport(transport),
+      ),
+      dependencyProvisioner: {
+        async provision() {
+          return environment;
+        },
+      },
+    }).verify({
+      ...input(),
+      dependencyProvisioning: {
+        request: {
+          identity: {
+            snapshotId: snapshot.id,
+            manifestHash: artifact.manifestHash,
+            lockfileHash: artifact.lockfileHash,
+            ecosystem: artifact.ecosystem,
+            packageManager: artifact.packageManager,
+            packageManagerVersion: artifact.packageManagerVersion,
+            toolchainVersion: artifact.toolchainVersion,
+            provisioningConfig: { offline: "true" },
+            generatedArtifactInputs: [],
+          },
+          artifact,
+          offlineOnly: true,
+        },
+        destination: "C:\\temp\\verify-agent-fixture",
+      },
+    });
+    expect(output.provisioningStatus).toBe("ready");
+    expect(output.executionEnvironment?.dependencyEnvironment?.artifactId).toBe(
+      artifact.artifactId,
+    );
+    expect(output.execution.dependencyArtifactId).toBe(artifact.artifactId);
+    expect(output.checkResult.inputHash).toBeDefined();
+  });
+
+  it("does not execute when dependency provisioning fails", async () => {
+    const { pipeline: service, transport } = pipeline(result);
+    await expect(
+      service.verify({
+        ...input(),
+        dependencyProvisioning: {
+          request: {} as never,
+          destination: "C:\\temp\\verify-agent-fixture",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "dependency_provisioning_failed" });
+    expect(transport.requests).toHaveLength(0);
+  });
 });

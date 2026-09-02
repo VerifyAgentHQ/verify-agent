@@ -31,6 +31,8 @@ export interface CheckExecution {
   readonly checkDefinitionId: CheckId;
   readonly jobId: VerificationJobId;
   readonly inputsHash: string;
+  /** Identity of the dependency environment used, when provisioning was required. */
+  readonly dependencyArtifactId?: string;
   readonly sandboxExecutionId?: string;
   readonly startedAt?: string;
   readonly completedAt?: string;

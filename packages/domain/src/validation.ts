@@ -144,6 +144,8 @@ export function validateCheckExecution(value: CheckExecution): void {
   identifier(value.checkDefinitionId, "check definition id");
   identifier(value.jobId, "job id");
   hash(value.inputsHash, "inputsHash");
+  if (value.dependencyArtifactId !== undefined)
+    identifier(value.dependencyArtifactId, "dependency artifact id");
   if (
     ![
       "queued",

@@ -214,6 +214,8 @@ export interface SandboxProcessConfig {
   readonly executable: string;
   readonly args?: readonly string[];
   readonly workingDirectory?: string;
+  /** Explicit child environment. The host environment is never inherited. */
+  readonly environment?: Readonly<Record<string, string>>;
   readonly startupTimeoutMs: number;
   readonly requestTimeoutMs: number;
   readonly maxMessageBytes: number;
@@ -239,6 +241,14 @@ function validateConfig(config: SandboxProcessConfig): void {
     throw new SandboxTransportError("sandbox process limits are invalid");
   if (config.args?.some((arg) => arg.includes("\0")))
     throw new SandboxTransportError("sandbox process argument contains NUL");
+  if (
+    config.environment &&
+    Object.entries(config.environment).some(
+      ([key, value]) =>
+        key.length === 0 || key.includes("\0") || value.includes("\0"),
+    )
+  )
+    throw new SandboxTransportError("sandbox process environment is invalid");
 }
 
 function boundedRead(stream: Readable, maximum: number): Promise<string> {
@@ -294,7 +304,7 @@ export class SubprocessSandboxTransport implements SandboxTransport {
       throw new SandboxTransportError("sandbox request exceeded size limit");
     const child = spawn(this.config.executable, [...(this.config.args ?? [])], {
       cwd: this.config.workingDirectory,
-      env: {},
+      env: { ...(this.config.environment ?? {}) },
       shell: false,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],

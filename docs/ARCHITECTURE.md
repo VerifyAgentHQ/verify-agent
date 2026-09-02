@@ -70,6 +70,54 @@ future verify-sandbox implementation
 
 Batch 4 Part 1 provides application-side orchestration; Batch 4 Part 3 adds the transport boundary and a bounded local subprocess adapter. VerifyAgent still does not execute commands itself, invoke Docker, or implement sandbox isolation.
 
+### Offline dependency provisioning
+
+Checks that require project dependencies have a separate provisioning concern:
+
+```text
+DETECT → PLAN → PROVISION DEPENDENCIES → MATERIALIZE SOURCE → EXECUTE → EVIDENCE
+```
+
+The internal proof-of-concept models a dependency environment as an immutable,
+content-addressed artifact identified by the source snapshot, manifest and
+lockfile hashes, package-manager/toolchain versions, provisioning configuration,
+and generated-artifact inputs. The fixture adapter only copies an operator-provided
+artifact; it never runs installers, package scripts, postinstall hooks, or network
+requests. Missing, unavailable, mismatched, or unsafe artifacts fail closed.
+
+Batch 11 adds a pnpm-specific trusted-stage builder for a controlled fixture.
+It creates a frozen, `--ignore-scripts` dependency tree from the supplied
+manifest and lockfile, records a separate materialized-content hash, and makes
+that artifact available to offline execution. The builder's explicit operator
+environment is separate from repository metadata; runtime does not inherit its
+network, credentials, or host `node_modules`. This is a proof of the boundary,
+not a universal dependency manager.
+
+Project source, dependencies, generated artifacts, and execution outputs remain
+separate inputs. Dependency provisioning does not alter `ExecutionSource`: a real
+sandbox using a trusted offline artifact remains `real`, while a fake sandbox
+remains `simulated`. This is a controlled architectural proof, not production
+dependency management.
+
+Generated framework state is a separate prerequisite class. The builder records
+inputs such as a TypeScript configuration for identity, but does not silently
+create `.next/types` or other project-generated outputs. A future preparatory
+stage must produce and attest those outputs before checks that require them.
+
+The Batch 12 execution-environment boundary makes provisioning explicit in the
+engine: a source snapshot, optional dependency environment, generated-artifact
+descriptors, and stable environment identity are prepared before execution.
+Provisioning failure is a distinct pipeline failure and prevents sandbox
+execution. Dependency provenance participates in execution identity but never
+rewrites real/simulated/fixture execution provenance.
+
+Generated-artifact preparation is a separate trusted boundary. Requirements
+are declarative, but artifact references and preparation policy come from the
+operator. The current prebuilt strategy copies bounded, integrity-checked
+output without executing repository scripts. The resulting generated artifact
+set is composed into `ExecutionEnvironment` before `CheckExecutor`; failures
+prevent execution and are not target-code failures.
+
 ### Evidence and result boundary
 
 ```text
@@ -113,7 +161,7 @@ The sandbox is an external execution boundary. This repository communicates with
 
 Batch 9 Part 1 validates this boundary with an optional integration test. When configured, the child receives an explicitly empty environment, structured JSON-line input, bounded messages, and real provenance. If the process or Docker backend is unavailable, the result remains a real-source error or the test is skipped; it is never downgraded to simulation.
 
-Batch 9 Part 2 validated the configured Windows process path against the locally built `verify-sandbox` `verify-sandbox-process` binary. The process handshake returned a protocol-compatible real-source response; Docker was unavailable on the development host, so no container command was executed and no success was claimed. The sandbox source tree was not changed.
+Batch 9 Part 3 validated the configured Windows process path against the locally built `verify-sandbox` `verify-sandbox-process` binary and the approved `verify-agent/runner:development` image. A harmless Cargo version request completed successfully through Docker, and a controlled invalid Cargo argument returned a real completed non-zero failure. A single Stellar Forge `typescript.typecheck` attempt reached a real container but timed out before producing a result because the staged snapshot intentionally had no dependency tree and the approved network-disabled environment cannot install dependencies. This is an infrastructure/runtime limitation, not a successful or simulated verification. The sandbox source tree was not changed. Runtime flags are configured in the external backend; this repository does not claim kernel-level guarantees beyond those observable in the sandbox implementation.
 
 ### Future GitHub / AI / GOAT boundaries
 
@@ -127,3 +175,20 @@ Batch 9 Part 2 validated the configured Windows process path against the locally
 - deterministic checks remain distinct from policy decisions
 - immutable facts are documented and preserved by the domain model
 - internal semantics may map onto public contract values explicitly and deliberately
+
+Batch 14 adds `ExecutionEnvironmentMaterializer`, which composes trusted source,
+offline dependency, and generated-artifact trees into the existing workspace.
+It preserves stable identity and rejects unsafe entries and conflicts. The
+real Docker fixture remains explicitly gated and requires an operator-supplied
+offline artifact; it is not run by the normal suite.
+
+Dependency artifacts are target-platform artifacts. Their identity includes the
+operating system and architecture. Offline provisioning can require the runner
+platform and rejects incompatible artifacts; Linux package launchers containing
+Windows paths are rejected rather than rewritten. The Linux launcher validator
+distinguishes actual Windows paths (`C:\Users\...`, `D:\project\...`,
+`\\server\share\...`) from harmless source-code literals, format strings, and
+escaped sequences such as `%s:\`. It requires a drive-letter colon and slash
+followed by path content and excludes `%`-prefixed format specifiers, so the
+`jsesc` launcher (`jsesc@%s:\n`) no longer triggers a false positive while real
+drive-letter and UNC references remain rejected.

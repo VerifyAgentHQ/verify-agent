@@ -70,8 +70,20 @@ function commandFromSpec(spec: CheckExecutionSpec): SandboxCommand {
 }
 
 export function createExecutionInputHash(
-  request: Pick<CheckExecutionRequest, "snapshot" | "definition" | "planItem">,
+  request: Omit<
+    Pick<
+      CheckExecutionRequest,
+      "snapshot" | "definition" | "planItem" | "executionEnvironment"
+    >,
+    "executionEnvironment"
+  > & {
+    readonly executionEnvironment?: CheckExecutionRequest["executionEnvironment"];
+  },
   spec: CheckExecutionSpec,
+  environment?: {
+    readonly dependencyArtifactId?: string;
+    readonly identityHash?: string;
+  },
 ): string {
   return sha256({
     source: request.snapshot.source,
@@ -80,6 +92,7 @@ export function createExecutionInputHash(
     checkVersion: request.definition.version,
     planItem: request.planItem,
     spec,
+    environment: request.executionEnvironment ?? environment,
   });
 }
 
@@ -246,6 +259,9 @@ export function createCheckExecutor(
         ...request.execution,
         inputsHash: inputHash,
         executionSource: sandbox.executionSource,
+        ...(request.execution.dependencyArtifactId === undefined
+          ? {}
+          : { dependencyArtifactId: request.execution.dependencyArtifactId }),
       };
       validateCheckExecution(queued);
       const sandboxRequest = mapCheckExecutionToSandboxJobRequest(

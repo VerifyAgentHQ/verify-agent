@@ -11,6 +11,9 @@ import type {
   PublicSourceReference,
   RepositorySnapshot,
   ExecutionSource,
+  DependencyEnvironment,
+  DependencyProvisioningRequest,
+  GeneratedArtifact,
   VerificationRequest,
   VerificationResult,
 } from "@verify-agent/domain";
@@ -103,6 +106,24 @@ export interface CheckExecutionRequest {
   readonly resultId: string;
   readonly createdAt: string;
   readonly limits?: ExecutionLimits;
+  readonly executionEnvironment?: ExecutionEnvironment;
+}
+
+export type ProvisioningStatus =
+  "not_started" | "provisioning" | "ready" | "failed";
+
+export interface ExecutionEnvironment {
+  readonly sourceSnapshotId: RepositorySnapshot["id"];
+  readonly dependencyEnvironment?: DependencyEnvironment;
+  readonly generatedArtifacts: readonly GeneratedArtifact[];
+  readonly identityHash: string;
+}
+
+export interface DependencyProvisioningPort {
+  provision(
+    request: DependencyProvisioningRequest,
+    destination: string,
+  ): Promise<DependencyEnvironment>;
 }
 
 export interface CheckExecutionOutcome {

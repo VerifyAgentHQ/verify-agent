@@ -18,7 +18,11 @@ export type {
   CheckExecutionRequest,
   CheckExecutionOutcome,
   CheckExecutor,
+  ExecutionEnvironment,
+  DependencyProvisioningPort,
+  ProvisioningStatus,
 } from "./interfaces.js";
+export type { GeneratedArtifact } from "@verify-agent/domain";
 export { createEngine } from "./runtime.js";
 export { DEFAULT_EXECUTION_LIMITS } from "./interfaces.js";
 export {
@@ -52,6 +56,45 @@ export {
   evidenceForCheckResult,
   findingsForCheckResults,
 } from "./aggregation.js";
+export {
+  PnpmDependencyArtifactBuilder,
+  DependencyProvisioningError,
+  OfflineDependencyProvisioner,
+  artifactDirectoryContentHash,
+  createDependencyArtifact,
+  dependencyArtifactContentHash,
+  dependencyArtifactId,
+  dependencyProvisioningEvidenceInput,
+  readArtifactFile,
+  validateDependencyArtifact,
+  validateDependencyPlatform,
+} from "./dependency-provisioning.js";
+export {
+  PrebuiltGeneratedArtifactPreparer,
+  createGeneratedArtifactSet,
+  generatedArtifactId,
+  generatedArtifactInputHash,
+  generatedArtifactSetHash,
+  removeMaterializedGeneratedArtifacts,
+} from "./generated-artifacts.js";
+export type {
+  GeneratedArtifactPreparer,
+  PrebuiltGeneratedArtifactPreparerConfig,
+} from "./generated-artifacts.js";
+export {
+  ExecutionEnvironmentMaterializer,
+  materializationIdentity,
+  materializedSourceRelativePath,
+  removeMaterializedEnvironment,
+} from "./environment-materializer.js";
+export type {
+  ExecutionEnvironmentMaterializationRequest,
+  ExecutionEnvironmentMaterializationResult,
+} from "./environment-materializer.js";
+export type {
+  PnpmDependencyArtifactBuildRequest,
+  PnpmDependencyArtifactBuilderConfig,
+} from "./dependency-provisioning.js";
 export type {
   VerificationAggregationInput,
   VerificationAggregationOutput,
