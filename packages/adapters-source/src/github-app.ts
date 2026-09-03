@@ -203,13 +203,21 @@ export interface GitHubAppInstallationTokenClient {
 
 const DEFAULT_API_BASE_URL = "https://api.github.com";
 
-function normalizeApiBaseUrl(value?: string): string {
+function normalizeApiBaseUrl(
+  value?: string,
+  options?: { readonly requireHttps?: boolean },
+): string {
   const base = (value ?? DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
   if (base.length === 0) return DEFAULT_API_BASE_URL;
   try {
     const url = new URL(base);
     if (url.protocol !== "https:" && url.protocol !== "http:") {
       throw new GitHubAppConfigurationError("apiBaseUrl must be http or https");
+    }
+    if (options?.requireHttps === true && url.protocol !== "https:") {
+      throw new GitHubAppConfigurationError(
+        "apiBaseUrl must be https for authenticated requests",
+      );
     }
     if (url.username || url.password) {
       throw new GitHubAppConfigurationError(
@@ -269,7 +277,9 @@ export function createGitHubAppInstallationTokenClient(
   ) {
     throw new GitHubAppConfigurationError("appConfig missing");
   }
-  const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl);
+  const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl, {
+    requireHttps: true,
+  });
   const fetchFn = options.fetch ?? globalThis.fetch;
   if (typeof fetchFn !== "function") {
     throw new GitHubInstallationTokenError("fetch not available");
@@ -396,6 +406,9 @@ export function createStaticGitHubInstallationResolver(
     repository: string,
     installationId: number,
   ): void => {
+    if (owner.includes("..") || repository.includes("..")) {
+      throw new GitHubInstallationTokenError("invalid owner or repository");
+    }
     const fakeRef = {
       kind: "github-snapshot" as const,
       owner,
@@ -452,6 +465,9 @@ export function createStaticGitHubInstallationResolver(
       owner: string,
       repository: string,
     ): Promise<number> {
+      if (owner.includes("..") || repository.includes("..")) {
+        throw new GitHubInstallationTokenError("invalid owner or repository");
+      }
       const fakeRef = {
         kind: "github-snapshot" as const,
         owner,
@@ -471,6 +487,187 @@ export function createStaticGitHubInstallationResolver(
         );
       }
       return id;
+    },
+  };
+}
+
+export interface GitHubApiInstallationResolverOptions {
+  readonly appConfig: GitHubAppConfig;
+  readonly apiBaseUrl?: string;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly now?: () => number;
+  readonly timeoutMs?: number;
+}
+
+export function createGitHubApiInstallationResolver(
+  options: GitHubApiInstallationResolverOptions,
+): GitHubInstallationResolver {
+  const { appConfig, now } = options;
+  if (
+    !appConfig ||
+    typeof appConfig.appId !== "string" ||
+    typeof appConfig.privateKey !== "string"
+  ) {
+    throw new GitHubAppConfigurationError("appConfig is required");
+  }
+  if (
+    appConfig.appId.trim().length === 0 ||
+    appConfig.privateKey.trim().length === 0
+  ) {
+    throw new GitHubAppConfigurationError("appConfig missing");
+  }
+  const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl, {
+    requireHttps: true,
+  });
+  const fetchFn = options.fetch ?? globalThis.fetch;
+  if (typeof fetchFn !== "function") {
+    throw new GitHubInstallationTokenError("fetch not available");
+  }
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new GitHubAppConfigurationError("timeoutMs must be positive integer");
+  }
+
+  return {
+    async resolveInstallationId(
+      owner: string,
+      repository: string,
+    ): Promise<number> {
+      if (owner.includes("..") || repository.includes("..")) {
+        throw new GitHubInstallationTokenError("invalid owner or repository");
+      }
+      const fakeRef = {
+        kind: "github-snapshot" as const,
+        owner,
+        repository,
+        sha: "a".repeat(40),
+      };
+      try {
+        validateGitHubSnapshotReference(fakeRef);
+      } catch {
+        throw new GitHubInstallationTokenError("invalid owner or repository");
+      }
+
+      let jwt: string;
+      try {
+        jwt = createGitHubAppJwt(appConfig, { now });
+      } catch (error) {
+        if (
+          error instanceof GitHubAppConfigurationError ||
+          error instanceof GitHubAppAuthenticationError ||
+          (error instanceof Error &&
+            (error.name === "GitHubAppConfigurationError" ||
+              error.name === "GitHubAppAuthenticationError"))
+        ) {
+          throw error;
+        }
+        throw new GitHubAppAuthenticationError("failed to create app JWT");
+      }
+
+      const url = `${apiBaseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/installation`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const abortError = (): Error => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        return error;
+      };
+      try {
+        let response: Response;
+        try {
+          response = await fetchFn(url, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${jwt}`,
+              Accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "verify-agent",
+            },
+            redirect: "error",
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            throw new GitHubInstallationTokenError(
+              "GitHub installation discovery timed out",
+            );
+          }
+          throw new GitHubInstallationTokenError(
+            "GitHub installation discovery failed",
+          );
+        }
+
+        if (!response.ok) {
+          const status = response.status;
+          if (status === 401)
+            throw new GitHubAppAuthenticationError(
+              "GitHub App authentication failed",
+            );
+          if (status === 403)
+            throw new GitHubAppAuthenticationError(
+              "GitHub App authorization failed",
+            );
+          if (status === 404)
+            throw new GitHubInstallationTokenError(
+              "GitHub App not installed for repository",
+            );
+          if (status === 429)
+            throw new GitHubRateLimitError("GitHub rate limit exceeded");
+          if (status >= 500)
+            throw new GitHubInstallationTokenError("GitHub server error");
+          throw new GitHubInstallationTokenError(
+            `GitHub request failed with status ${status}`,
+          );
+        }
+
+        let data: unknown;
+        try {
+          data = await Promise.race([
+            response.json(),
+            new Promise<never>((_, reject) => {
+              if (controller.signal.aborted) {
+                reject(abortError());
+              } else {
+                controller.signal.addEventListener(
+                  "abort",
+                  () => reject(abortError()),
+                  { once: true },
+                );
+              }
+            }),
+          ]);
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            throw new GitHubInstallationTokenError(
+              "GitHub installation discovery timed out",
+            );
+          }
+          throw new GitHubInstallationTokenError(
+            "invalid GitHub installation response",
+          );
+        }
+
+        if (typeof data !== "object" || data === null || Array.isArray(data)) {
+          throw new GitHubInstallationTokenError(
+            "invalid GitHub installation response",
+          );
+        }
+        const record = data as Record<string, unknown>;
+        const id = record.id;
+        if (
+          typeof id !== "number" ||
+          !Number.isInteger(id) ||
+          !Number.isSafeInteger(id) ||
+          id <= 0
+        ) {
+          throw new GitHubInstallationTokenError(
+            "invalid installation id in response",
+          );
+        }
+        return id;
+      } finally {
+        clearTimeout(timeout);
+      }
     },
   };
 }

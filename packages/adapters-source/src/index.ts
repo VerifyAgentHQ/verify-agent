@@ -58,10 +58,12 @@ export {
   verifyGitHubAppJwt,
 } from "./github-app.js";
 export type {
+  GitHubApiInstallationResolverOptions,
   GitHubAppSourceProviderOptions,
   GitHubInstallationResolver,
 } from "./github-app.js";
 export {
+  createGitHubApiInstallationResolver,
   createGitHubAppSourceProvider,
   createStaticGitHubInstallationResolver,
 } from "./github-app.js";
