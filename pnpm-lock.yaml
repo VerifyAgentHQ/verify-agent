@@ -23,6 +23,15 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  apps/api:
+    dependencies:
+      "@verify-agent/adapters-lang":
+        specifier: workspace:*
+        version: link:../../packages/adapters-lang
+      "@verify-agent/engine":
+        specifier: workspace:*
+        version: link:../../packages/engine
+
   packages/adapters-lang:
     dependencies:
       "@verify-agent/domain":

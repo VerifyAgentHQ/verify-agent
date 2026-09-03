@@ -111,3 +111,4 @@ export type {
   VerificationPipelineInput,
   VerificationPipelineOutput,
 } from "./pipeline.js";
+export type { DetectionContext } from "./pipeline-types.js";

@@ -29,6 +29,7 @@
     { "path": "./packages/goat" },
     { "path": "./packages/adapters-lang" },
     { "path": "./packages/adapters-source" },
-    { "path": "./packages/config" }
+    { "path": "./packages/config" },
+    { "path": "./apps/api" }
   ]
 }
