@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@verify-agent/adapters-lang": "workspace:*",
+    "@verify-agent/adapters-source": "workspace:*",
+    "@verify-agent/domain": "workspace:*",
     "@verify-agent/engine": "workspace:*"
   }
 }

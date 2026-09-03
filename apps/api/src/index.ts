@@ -4,9 +4,19 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { brandId } from "@verify-agent/domain";
 import type {
-  DetectionContext,
+  ChangeSet,
+  PolicyId,
+  Project,
+  RepositorySnapshot,
+  VerificationRequest,
+  VerificationJob,
+  VerificationResult,
+} from "@verify-agent/domain";
+import type {
   VerifyRepositorySnapshotRequest,
+  DetectionContext,
 } from "@verify-agent/engine";
 import {
   createCheckExecutor,
@@ -14,9 +24,21 @@ import {
   SubprocessSandboxTransport,
   createVerificationPipeline,
   VerificationApplicationService,
+  type VerificationApplicationService as VerificationApplicationServiceType,
 } from "@verify-agent/engine";
-import { createProjectDetectionService } from "@verify-agent/adapters-lang";
-import type { VerificationApplicationService as VerificationApplicationServiceType } from "@verify-agent/engine";
+import {
+  createProjectDetectionService,
+  createMemoryDetectionContext,
+} from "@verify-agent/adapters-lang";
+import {
+  InvalidSourceReferenceError,
+  type ResolvedSource,
+  type SourceResolver,
+} from "@verify-agent/adapters-source";
+import type {
+  PublicVerifyRequest,
+  PublicVerificationResponse,
+} from "./public-dto.js";
 import { fileURLToPath } from "node:url";
 
 const MAX_BODY_BYTES = 1_048_576;
@@ -38,52 +60,115 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function createDetectionContext(value: unknown): DetectionContext {
-  if (!isRecord(value) || !isRecord(value.files)) {
-    throw new ApiRequestError(
-      400,
-      "detectionContext.files must be an object of relative paths to text",
-    );
-  }
-  const files = new Map<string, string>();
-  for (const [path, contents] of Object.entries(value.files)) {
-    if (typeof contents !== "string") {
-      throw new ApiRequestError(
-        400,
-        `detectionContext.files[${path}] must be text`,
-      );
-    }
-    files.set(path, contents);
-  }
-  return {
-    exists: (path: string) => files.has(path),
-    readFile: (path: string) => files.get(path),
-    listDirectory: (path = "") =>
-      [...files.keys()].filter((filePath) => filePath.startsWith(path)).sort(),
-  };
-}
-
-function parseVerifyRequest(value: unknown): VerifyRepositorySnapshotRequest {
+function parsePublicRequest(value: unknown): PublicVerifyRequest {
   if (!isRecord(value)) {
     throw new ApiRequestError(400, "request body must be a JSON object");
   }
-  const required = [
-    "project",
-    "snapshot",
-    "changeSet",
-    "request",
-    "job",
-    "verificationId",
-  ];
-  for (const field of required) {
-    if (!(field in value)) {
-      throw new ApiRequestError(400, `missing required field: ${field}`);
-    }
+  if (
+    !isRecord(value.source) ||
+    value.source.kind !== "snapshot" ||
+    typeof value.source.id !== "string"
+  ) {
+    throw new ApiRequestError(
+      400,
+      "source must be { kind: 'snapshot', id: string }",
+    );
   }
+  return value as unknown as PublicVerifyRequest;
+}
+
+function adaptRequest(
+  publicRequest: PublicVerifyRequest,
+  resolved: ResolvedSource,
+): VerifyRepositorySnapshotRequest {
+  const snapshot: RepositorySnapshot = resolved.snapshot;
+  const projectId = snapshot.projectId;
+  const changeSetId = brandId(
+    `${publicRequest.source.id}-changeset`,
+  ) as ChangeSet["id"];
+  const requestId = brandId(
+    `${publicRequest.source.id}-request`,
+  ) as VerificationRequest["id"];
+  const jobId = brandId(
+    `${publicRequest.source.id}-job`,
+  ) as VerificationJob["id"];
+  const verificationId = `${publicRequest.source.id}-verification`;
+  const createdAt = new Date().toISOString();
+
+  const changeSet: ChangeSet = {
+    id: changeSetId,
+    baseSourceState: snapshot.sourceState,
+    headSourceState: snapshot.sourceState,
+    changedFiles: [],
+    additions: 0,
+    deletions: 0,
+    changeHash: publicRequest.source.id,
+    issueReferences: [],
+  };
+
+  const request: VerificationRequest = {
+    id: requestId,
+    projectId,
+    snapshotId: snapshot.id,
+    changeSetId,
+    requestedBy: { type: "source-platform" },
+    mode: "commit",
+    requestedChecks: [],
+    policyId: brandId("default") as PolicyId,
+    priority: 0,
+    createdAt,
+  };
+
+  const job: VerificationJob = {
+    id: jobId,
+    requestId,
+    attempt: 1,
+    status: "queued",
+  };
+
+  const detectionContext: DetectionContext = createMemoryDetectionContext(
+    resolved.sourceContents,
+  );
+
+  const project: Project = {
+    id: projectId,
+    name: "",
+    root: ".",
+  };
+
   return {
-    ...value,
-    detectionContext: createDetectionContext(value.detectionContext),
-  } as unknown as VerifyRepositorySnapshotRequest;
+    project,
+    snapshot,
+    changeSet,
+    detectionContext,
+    request,
+    job,
+    verificationId,
+  };
+}
+
+function adaptResult(
+  result: VerificationResult,
+  source: PublicVerifyRequest["source"],
+): PublicVerificationResponse {
+  return {
+    status: result.status,
+    coverage: {
+      verified: result.coverage.verified,
+      partial: result.coverage.partial,
+      unsupported: result.coverage.unsupported,
+      notApplicable: result.coverage.notApplicable,
+    },
+    checkResults: result.checkResults,
+    findings: result.findingReferences,
+    evidenceReferences: result.evidenceReferences,
+    policyDecision: result.policyDecision,
+    summary: result.summary,
+    resultVersion: result.resultVersion,
+    contentHash: result.contentHash,
+    createdAt: result.createdAt,
+    source,
+  };
 }
 
 function sendJson(
@@ -138,9 +223,10 @@ export interface VerificationApi {
 
 export function createVerificationApi(
   applicationService: Pick<VerificationApplicationServiceType, "verify">,
+  sourceResolver: SourceResolver,
 ): VerificationApi {
   const server = createServer((request, response) => {
-    void handleRequest(request, response, applicationService);
+    void handleRequest(request, response, applicationService, sourceResolver);
   });
   return {
     server,
@@ -158,9 +244,10 @@ export interface ApiServerOptions {
 
 export async function startApiServer(
   applicationService: Pick<VerificationApplicationServiceType, "verify">,
+  sourceResolver: SourceResolver,
   options: ApiServerOptions = {},
 ): Promise<VerificationApi> {
-  const api = createVerificationApi(applicationService);
+  const api = createVerificationApi(applicationService, sourceResolver);
   const port = options.port ?? readPort(process.env.PORT);
   const host = options.host ?? "0.0.0.0";
   await new Promise<void>((resolve, reject) => {
@@ -204,14 +291,28 @@ function createConfiguredApplicationService(): VerificationApplicationService {
   return new VerificationApplicationService(pipeline);
 }
 
+function createDefaultSourceResolver(): SourceResolver {
+  return {
+    async resolveSnapshot(source) {
+      throw new InvalidSourceReferenceError(
+        `source not resolvable: ${source.id}`,
+      );
+    },
+  };
+}
+
 export async function startConfiguredApiServer(): Promise<VerificationApi> {
-  return startApiServer(createConfiguredApplicationService());
+  return startApiServer(
+    createConfiguredApplicationService(),
+    createDefaultSourceResolver(),
+  );
 }
 
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   applicationService: Pick<VerificationApplicationServiceType, "verify">,
+  sourceResolver: SourceResolver,
 ): Promise<void> {
   if (request.method === "GET" && request.url === "/health") {
     sendJson(response, 200, { status: "ok" });
@@ -231,8 +332,23 @@ async function handleRequest(
     return;
   }
   try {
-    const input = parseVerifyRequest(await readJson(request));
-    sendJson(response, 200, await applicationService.verify(input));
+    const input = await readJson(request);
+    const publicRequest = parsePublicRequest(input);
+    let resolved: ResolvedSource;
+    try {
+      resolved = await sourceResolver.resolveSnapshot(publicRequest.source);
+    } catch (error) {
+      if (
+        error instanceof InvalidSourceReferenceError ||
+        (error instanceof Error && error.name === "InvalidSourceReferenceError")
+      ) {
+        throw new ApiRequestError(400, "invalid source reference");
+      }
+      throw error;
+    }
+    const verifyInput = adaptRequest(publicRequest, resolved);
+    const result = await applicationService.verify(verifyInput);
+    sendJson(response, 200, adaptResult(result, publicRequest.source));
   } catch (error) {
     if (error instanceof ApiRequestError) {
       sendJson(response, error.statusCode, {

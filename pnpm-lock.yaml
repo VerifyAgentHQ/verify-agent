@@ -28,6 +28,12 @@ importers:
       "@verify-agent/adapters-lang":
         specifier: workspace:*
         version: link:../../packages/adapters-lang
+      "@verify-agent/adapters-source":
+        specifier: workspace:*
+        version: link:../../packages/adapters-source
+      "@verify-agent/domain":
+        specifier: workspace:*
+        version: link:../../packages/domain
       "@verify-agent/engine":
         specifier: workspace:*
         version: link:../../packages/engine
