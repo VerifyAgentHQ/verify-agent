@@ -1,5 +1,16 @@
 import { createPrivateKey, createSign, createVerify } from "node:crypto";
-import { GitHubRateLimitError } from "./github.js";
+import { InvalidSourceReferenceError } from "./resolver.js";
+import type { ResolvedSource } from "./resolver.js";
+import {
+  createGitHubApiSourceProvider,
+  validateGitHubSnapshotReference,
+} from "./github.js";
+import type { GitHubSourceProvider } from "./github.js";
+import {
+  GitHubAuthenticationError,
+  GitHubProviderError,
+  GitHubRateLimitError,
+} from "./github.js";
 export { GitHubRateLimitError } from "./github.js";
 
 export interface GitHubAppConfig {
@@ -360,6 +371,265 @@ export function createGitHubAppInstallationTokenClient(
         token: token.trim(),
         expiresAt: expiresAt.trim(),
       };
+    },
+  };
+}
+
+export interface GitHubInstallationResolver {
+  resolveInstallationId(owner: string, repository: string): Promise<number>;
+}
+
+export function createStaticGitHubInstallationResolver(
+  entries:
+    | Record<string, number>
+    | Map<string, number>
+    | ReadonlyArray<{
+        readonly owner: string;
+        readonly repository: string;
+        readonly installationId: number;
+      }>,
+): GitHubInstallationResolver {
+  const map = new Map<string, number>();
+
+  const addEntry = (
+    owner: string,
+    repository: string,
+    installationId: number,
+  ): void => {
+    const fakeRef = {
+      kind: "github-snapshot" as const,
+      owner,
+      repository,
+      sha: "a".repeat(40),
+    };
+    try {
+      validateGitHubSnapshotReference(fakeRef);
+    } catch {
+      throw new GitHubInstallationTokenError("invalid owner or repository");
+    }
+    if (
+      !Number.isInteger(installationId) ||
+      !Number.isSafeInteger(installationId) ||
+      installationId <= 0
+    ) {
+      throw new GitHubInstallationTokenError(
+        "installationId must be a positive safe integer",
+      );
+    }
+    const key = `${owner.toLowerCase()}/${repository.toLowerCase()}`;
+    if (map.has(key)) {
+      throw new Error(`duplicate installation mapping for ${key}`);
+    }
+    map.set(key, installationId);
+  };
+
+  if (Array.isArray(entries)) {
+    for (const entry of entries) {
+      addEntry(entry.owner, entry.repository, entry.installationId);
+    }
+  } else if (entries instanceof Map) {
+    for (const [key, id] of entries.entries()) {
+      const slash = key.indexOf("/");
+      if (slash === -1)
+        throw new GitHubInstallationTokenError(`invalid map key: ${key}`);
+      const owner = key.slice(0, slash);
+      const repo = key.slice(slash + 1);
+      addEntry(owner, repo, id);
+    }
+  } else {
+    for (const [key, id] of Object.entries(entries)) {
+      const slash = key.indexOf("/");
+      if (slash === -1)
+        throw new GitHubInstallationTokenError(`invalid record key: ${key}`);
+      const owner = key.slice(0, slash);
+      const repo = key.slice(slash + 1);
+      addEntry(owner, repo, id);
+    }
+  }
+
+  return {
+    async resolveInstallationId(
+      owner: string,
+      repository: string,
+    ): Promise<number> {
+      const fakeRef = {
+        kind: "github-snapshot" as const,
+        owner,
+        repository,
+        sha: "a".repeat(40),
+      };
+      try {
+        validateGitHubSnapshotReference(fakeRef);
+      } catch {
+        throw new GitHubInstallationTokenError("invalid owner or repository");
+      }
+      const key = `${owner.toLowerCase()}/${repository.toLowerCase()}`;
+      const id = map.get(key);
+      if (id === undefined) {
+        throw new GitHubInstallationTokenError(
+          `unknown repository: ${owner}/${repository}`,
+        );
+      }
+      return id;
+    },
+  };
+}
+
+export interface GitHubAppSourceProviderOptions {
+  readonly installationResolver: GitHubInstallationResolver;
+  readonly installationTokenClient: GitHubAppInstallationTokenClient;
+  readonly apiBaseUrl?: string;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly maxFiles?: number;
+  readonly maxTotalBytes?: number;
+  readonly maxFileBytes?: number;
+  readonly retrievedAt?: string;
+}
+
+export function createGitHubAppSourceProvider(
+  options: GitHubAppSourceProviderOptions,
+): GitHubSourceProvider {
+  const {
+    installationResolver,
+    installationTokenClient,
+    apiBaseUrl,
+    fetch: fetchFn,
+    maxFiles,
+    maxTotalBytes,
+    maxFileBytes,
+    retrievedAt,
+  } = options;
+
+  if (
+    !installationResolver ||
+    typeof installationResolver.resolveInstallationId !== "function"
+  ) {
+    throw new GitHubAppConfigurationError("installationResolver is required");
+  }
+  if (
+    !installationTokenClient ||
+    typeof installationTokenClient.createInstallationToken !== "function"
+  ) {
+    throw new GitHubAppConfigurationError(
+      "installationTokenClient is required",
+    );
+  }
+
+  return {
+    async resolveSnapshot(reference): Promise<ResolvedSource> {
+      validateGitHubSnapshotReference(reference);
+
+      let installationId: number;
+      try {
+        installationId = await installationResolver.resolveInstallationId(
+          reference.owner,
+          reference.repository,
+        );
+      } catch (error) {
+        if (
+          error instanceof GitHubInstallationTokenError ||
+          error instanceof GitHubAppConfigurationError ||
+          error instanceof GitHubAppAuthenticationError ||
+          (error instanceof Error &&
+            (error.name === "GitHubInstallationTokenError" ||
+              error.name === "GitHubAppConfigurationError" ||
+              error.name === "GitHubAppAuthenticationError"))
+        ) {
+          throw error;
+        }
+        throw new GitHubInstallationTokenError(
+          "failed to resolve installation",
+        );
+      }
+
+      let installationToken: { token: string };
+      try {
+        const result =
+          await installationTokenClient.createInstallationToken(installationId);
+        installationToken = { token: result.token };
+      } catch (error) {
+        if (
+          error instanceof GitHubAppConfigurationError ||
+          (error instanceof Error &&
+            error.name === "GitHubAppConfigurationError")
+        ) {
+          throw new GitHubAppConfigurationError(
+            "GitHub App configuration error",
+          );
+        }
+        if (
+          error instanceof GitHubAppAuthenticationError ||
+          (error instanceof Error &&
+            error.name === "GitHubAppAuthenticationError")
+        ) {
+          throw new GitHubAppAuthenticationError(
+            "GitHub App authentication failed",
+          );
+        }
+        if (
+          error instanceof GitHubInstallationTokenError ||
+          (error instanceof Error &&
+            error.name === "GitHubInstallationTokenError")
+        ) {
+          throw new GitHubInstallationTokenError(
+            "GitHub installation token error",
+          );
+        }
+        if (
+          error instanceof GitHubRateLimitError ||
+          (error instanceof Error && error.name === "GitHubRateLimitError")
+        ) {
+          throw new GitHubRateLimitError("GitHub rate limit exceeded");
+        }
+        throw new GitHubInstallationTokenError(
+          "failed to create installation token",
+        );
+      }
+
+      const token = installationToken.token;
+      if (typeof token !== "string" || token.trim().length === 0) {
+        throw new GitHubInstallationTokenError("missing installation token");
+      }
+
+      const apiProvider = createGitHubApiSourceProvider({
+        token: token.trim(),
+        apiBaseUrl,
+        fetch: fetchFn,
+        maxFiles,
+        maxTotalBytes,
+        maxFileBytes,
+        retrievedAt,
+      });
+
+      try {
+        return await apiProvider.resolveSnapshot(reference);
+      } catch (error) {
+        if (
+          error instanceof InvalidSourceReferenceError ||
+          error instanceof GitHubAppConfigurationError ||
+          error instanceof GitHubAppAuthenticationError ||
+          error instanceof GitHubInstallationTokenError ||
+          error instanceof GitHubRateLimitError ||
+          (error instanceof Error &&
+            (error.name === "InvalidSourceReferenceError" ||
+              error.name === "GitHubAppConfigurationError" ||
+              error.name === "GitHubAppAuthenticationError" ||
+              error.name === "GitHubInstallationTokenError" ||
+              error.name === "GitHubRateLimitError" ||
+              error.name === "GitHubProviderError" ||
+              error.name === "GitHubAuthenticationError"))
+        ) {
+          throw error;
+        }
+        // Ensure token not in message
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes(token)) {
+          throw new GitHubInstallationTokenError(
+            "GitHub source request failed",
+          );
+        }
+        throw error;
+      }
     },
   };
 }

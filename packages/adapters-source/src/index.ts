@@ -57,3 +57,11 @@ export {
   readGitHubAppConfig,
   verifyGitHubAppJwt,
 } from "./github-app.js";
+export type {
+  GitHubAppSourceProviderOptions,
+  GitHubInstallationResolver,
+} from "./github-app.js";
+export {
+  createGitHubAppSourceProvider,
+  createStaticGitHubInstallationResolver,
+} from "./github-app.js";
