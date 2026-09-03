@@ -15,3 +15,4 @@ export * from "./immutability.js";
 export * from "./contract-mapping.js";
 export * from "./public-contracts.js";
 export * from "./dependencies.js";
+export * from "./source-resolution.js";

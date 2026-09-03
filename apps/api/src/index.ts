@@ -4,20 +4,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { brandId } from "@verify-agent/domain";
-import type {
-  ChangeSet,
-  PolicyId,
-  Project,
-  RepositorySnapshot,
-  VerificationRequest,
-  VerificationJob,
-  VerificationResult,
-} from "@verify-agent/domain";
-import type {
-  VerifyRepositorySnapshotRequest,
-  DetectionContext,
-} from "@verify-agent/engine";
+import type { VerificationResult } from "@verify-agent/domain";
 import {
   createCheckExecutor,
   createSandboxExecutorFromTransport,
@@ -26,14 +13,15 @@ import {
   VerificationApplicationService,
   type VerificationApplicationService as VerificationApplicationServiceType,
 } from "@verify-agent/engine";
-import {
-  createProjectDetectionService,
-  createMemoryDetectionContext,
-} from "@verify-agent/adapters-lang";
+import { createProjectDetectionService } from "@verify-agent/adapters-lang";
 import {
   InvalidSourceReferenceError,
-  type ResolvedSource,
   type SourceResolver,
+  createGitHubApiInstallationResolver,
+  createGitHubAppInstallationTokenClient,
+  createGitHubAppSourceProvider,
+  createGitHubSourceResolver,
+  readGitHubAppConfig,
 } from "@verify-agent/adapters-source";
 import type {
   PublicVerifyRequest,
@@ -75,76 +63,6 @@ function parsePublicRequest(value: unknown): PublicVerifyRequest {
     );
   }
   return value as unknown as PublicVerifyRequest;
-}
-
-function adaptRequest(
-  publicRequest: PublicVerifyRequest,
-  resolved: ResolvedSource,
-): VerifyRepositorySnapshotRequest {
-  const snapshot: RepositorySnapshot = resolved.snapshot;
-  const projectId = snapshot.projectId;
-  const changeSetId = brandId(
-    `${publicRequest.source.id}-changeset`,
-  ) as ChangeSet["id"];
-  const requestId = brandId(
-    `${publicRequest.source.id}-request`,
-  ) as VerificationRequest["id"];
-  const jobId = brandId(
-    `${publicRequest.source.id}-job`,
-  ) as VerificationJob["id"];
-  const verificationId = `${publicRequest.source.id}-verification`;
-  const createdAt = new Date().toISOString();
-
-  const changeSet: ChangeSet = {
-    id: changeSetId,
-    baseSourceState: snapshot.sourceState,
-    headSourceState: snapshot.sourceState,
-    changedFiles: [],
-    additions: 0,
-    deletions: 0,
-    changeHash: publicRequest.source.id,
-    issueReferences: [],
-  };
-
-  const request: VerificationRequest = {
-    id: requestId,
-    projectId,
-    snapshotId: snapshot.id,
-    changeSetId,
-    requestedBy: { type: "source-platform" },
-    mode: "commit",
-    requestedChecks: [],
-    policyId: brandId("default") as PolicyId,
-    priority: 0,
-    createdAt,
-  };
-
-  const job: VerificationJob = {
-    id: jobId,
-    requestId,
-    attempt: 1,
-    status: "queued",
-  };
-
-  const detectionContext: DetectionContext = createMemoryDetectionContext(
-    resolved.sourceContents,
-  );
-
-  const project: Project = {
-    id: projectId,
-    name: "",
-    root: ".",
-  };
-
-  return {
-    project,
-    snapshot,
-    changeSet,
-    detectionContext,
-    request,
-    job,
-    verificationId,
-  };
 }
 
 function adaptResult(
@@ -222,11 +140,10 @@ export interface VerificationApi {
 }
 
 export function createVerificationApi(
-  applicationService: Pick<VerificationApplicationServiceType, "verify">,
-  sourceResolver: SourceResolver,
+  applicationService: Pick<VerificationApplicationServiceType, "verifySource">,
 ): VerificationApi {
   const server = createServer((request, response) => {
-    void handleRequest(request, response, applicationService, sourceResolver);
+    void handleRequest(request, response, applicationService);
   });
   return {
     server,
@@ -243,11 +160,10 @@ export interface ApiServerOptions {
 }
 
 export async function startApiServer(
-  applicationService: Pick<VerificationApplicationServiceType, "verify">,
-  sourceResolver: SourceResolver,
+  applicationService: Pick<VerificationApplicationServiceType, "verifySource">,
   options: ApiServerOptions = {},
 ): Promise<VerificationApi> {
-  const api = createVerificationApi(applicationService, sourceResolver);
+  const api = createVerificationApi(applicationService);
   const port = options.port ?? readPort(process.env.PORT);
   const host = options.host ?? "0.0.0.0";
   await new Promise<void>((resolve, reject) => {
@@ -288,7 +204,10 @@ function createConfiguredApplicationService(): VerificationApplicationService {
       createSandboxExecutorFromTransport(transport),
     ),
   });
-  return new VerificationApplicationService(pipeline);
+  return new VerificationApplicationService(
+    pipeline,
+    createConfiguredSourceResolver(),
+  );
 }
 
 function createDefaultSourceResolver(): SourceResolver {
@@ -301,18 +220,47 @@ function createDefaultSourceResolver(): SourceResolver {
   };
 }
 
+function createConfiguredSourceResolver(): SourceResolver {
+  const env = process.env;
+  const appIdConfigured =
+    typeof env.GITHUB_APP_ID === "string" &&
+    env.GITHUB_APP_ID.trim().length > 0;
+  const privateKeyConfigured =
+    typeof env.GITHUB_APP_PRIVATE_KEY === "string" &&
+    env.GITHUB_APP_PRIVATE_KEY.trim().length > 0;
+  if (!appIdConfigured || !privateKeyConfigured) {
+    return createDefaultSourceResolver();
+  }
+  const appConfig = readGitHubAppConfig(env);
+  const apiBaseUrl =
+    typeof env.GITHUB_API_BASE_URL === "string" &&
+    env.GITHUB_API_BASE_URL.trim().length > 0
+      ? env.GITHUB_API_BASE_URL.trim()
+      : undefined;
+  const installationResolver = createGitHubApiInstallationResolver({
+    appConfig,
+    ...(apiBaseUrl ? { apiBaseUrl } : {}),
+  });
+  const installationTokenClient = createGitHubAppInstallationTokenClient({
+    appConfig,
+    ...(apiBaseUrl ? { apiBaseUrl } : {}),
+  });
+  const provider = createGitHubAppSourceProvider({
+    installationResolver,
+    installationTokenClient,
+    ...(apiBaseUrl ? { apiBaseUrl } : {}),
+  });
+  return createGitHubSourceResolver(provider);
+}
+
 export async function startConfiguredApiServer(): Promise<VerificationApi> {
-  return startApiServer(
-    createConfiguredApplicationService(),
-    createDefaultSourceResolver(),
-  );
+  return startApiServer(createConfiguredApplicationService());
 }
 
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  applicationService: Pick<VerificationApplicationServiceType, "verify">,
-  sourceResolver: SourceResolver,
+  applicationService: Pick<VerificationApplicationServiceType, "verifySource">,
 ): Promise<void> {
   if (request.method === "GET" && request.url === "/health") {
     sendJson(response, 200, { status: "ok" });
@@ -334,25 +282,23 @@ async function handleRequest(
   try {
     const input = await readJson(request);
     const publicRequest = parsePublicRequest(input);
-    let resolved: ResolvedSource;
-    try {
-      resolved = await sourceResolver.resolveSnapshot(publicRequest.source);
-    } catch (error) {
-      if (
-        error instanceof InvalidSourceReferenceError ||
-        (error instanceof Error && error.name === "InvalidSourceReferenceError")
-      ) {
-        throw new ApiRequestError(400, "invalid source reference");
-      }
-      throw error;
-    }
-    const verifyInput = adaptRequest(publicRequest, resolved);
-    const result = await applicationService.verify(verifyInput);
+    const result = await applicationService.verifySource({
+      source: publicRequest.source,
+    });
     sendJson(response, 200, adaptResult(result, publicRequest.source));
   } catch (error) {
     if (error instanceof ApiRequestError) {
       sendJson(response, error.statusCode, {
         error: { code: "invalid_request", message: error.message },
+      });
+      return;
+    }
+    if (
+      error instanceof InvalidSourceReferenceError ||
+      (error instanceof Error && error.name === "InvalidSourceReferenceError")
+    ) {
+      sendJson(response, 400, {
+        error: { code: "invalid_request", message: "invalid source reference" },
       });
       return;
     }

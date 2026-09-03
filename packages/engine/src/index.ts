@@ -53,7 +53,10 @@ export {
   VerificationApplicationService,
   VerificationApplicationServiceError,
 } from "./application-service.js";
-export type { VerifyRepositorySnapshotRequest } from "./application-service.js";
+export type {
+  VerifyRepositorySnapshotRequest,
+  VerifySourceRequest,
+} from "./application-service.js";
 export {
   aggregateVerification,
   aggregationInputFromPipeline,

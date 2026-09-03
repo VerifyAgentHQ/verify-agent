@@ -8,6 +8,13 @@ import type {
   VerificationRequest,
   VerificationResult,
 } from "@verify-agent/domain";
+import {
+  brandId,
+  InvalidSourceReferenceError,
+  type ResolvedSource,
+  type SnapshotSourceReference,
+  type SourceResolver,
+} from "@verify-agent/domain";
 import type { PlannerConfig } from "@verify-agent/checks";
 import type { ExecutionLimits } from "./interfaces.js";
 import type { DetectionContext } from "./pipeline-types.js";
@@ -17,6 +24,7 @@ import {
   type VerificationPipelineOutput,
   VerificationPipelineError,
 } from "./pipeline.js";
+import { createMemoryDetectionContext } from "./memory-detection-context.js";
 import {
   aggregateVerification,
   aggregationInputFromPipeline,
@@ -38,6 +46,16 @@ export interface VerifyRepositorySnapshotRequest {
   readonly generatedArtifactDestination?: string;
 }
 
+export interface VerifySourceRequest {
+  readonly source: SnapshotSourceReference;
+  readonly plannerConfig?: PlannerConfig;
+  readonly selectedCheckIds?: readonly CheckId[];
+  readonly executionLimits?: ExecutionLimits;
+  readonly dependencyProvisioning?: VerifyRepositorySnapshotRequest["dependencyProvisioning"];
+  readonly generatedArtifactRequirements?: readonly GeneratedArtifactRequirement[];
+  readonly generatedArtifactDestination?: string;
+}
+
 export class VerificationApplicationServiceError extends Error {
   constructor(
     message: string,
@@ -49,8 +67,31 @@ export class VerificationApplicationServiceError extends Error {
   }
 }
 
+function isInvalidSourceReferenceError(error: unknown): boolean {
+  return (
+    error instanceof InvalidSourceReferenceError ||
+    (error instanceof Error && error.name === "InvalidSourceReferenceError")
+  );
+}
+
+function validateSourceReference(source: unknown): SnapshotSourceReference {
+  if (
+    typeof source !== "object" ||
+    source === null ||
+    (source as { kind?: unknown }).kind !== "snapshot" ||
+    typeof (source as { id?: unknown }).id !== "string" ||
+    (source as { id: string }).id.trim().length === 0
+  ) {
+    throw new InvalidSourceReferenceError("invalid source reference");
+  }
+  return source as SnapshotSourceReference;
+}
+
 export class VerificationApplicationService {
-  constructor(private readonly pipeline: VerificationPipeline) {}
+  constructor(
+    private readonly pipeline: VerificationPipeline,
+    private readonly sourceResolver: SourceResolver,
+  ) {}
 
   async verify(
     input: VerifyRepositorySnapshotRequest,
@@ -107,5 +148,99 @@ export class VerificationApplicationService {
     );
 
     return aggregateVerification(aggregationInput).result;
+  }
+
+  /**
+   * Resolves a provider-neutral source reference through the injected
+   * SourceResolver, then verifies the resolved immutable snapshot with the
+   * existing verification pipeline. The application service never learns how
+   * the source was obtained.
+   */
+  async verifySource(input: VerifySourceRequest): Promise<VerificationResult> {
+    const reference = validateSourceReference(input?.source);
+    let resolved: ResolvedSource;
+    try {
+      resolved = await this.sourceResolver.resolveSnapshot(reference);
+    } catch (error) {
+      if (isInvalidSourceReferenceError(error)) {
+        throw error;
+      }
+      throw new VerificationApplicationServiceError(
+        "Source resolution failed",
+        "source_resolution_failed",
+        error,
+      );
+    }
+    return this.verify(this.adaptResolvedSource(resolved, input));
+  }
+
+  private adaptResolvedSource(
+    resolved: ResolvedSource,
+    input: VerifySourceRequest,
+  ): VerifyRepositorySnapshotRequest {
+    const snapshot: RepositorySnapshot = resolved.snapshot;
+    const projectId = snapshot.projectId;
+    const changeSetId = brandId(
+      `${input.source.id}-changeset`,
+    ) as ChangeSet["id"];
+    const requestId = brandId(
+      `${input.source.id}-request`,
+    ) as VerificationRequest["id"];
+    const jobId = brandId(`${input.source.id}-job`) as VerificationJob["id"];
+    const verificationId = `${input.source.id}-verification`;
+    const createdAt = new Date().toISOString();
+
+    const changeSet: ChangeSet = {
+      id: changeSetId,
+      baseSourceState: snapshot.sourceState,
+      headSourceState: snapshot.sourceState,
+      changedFiles: [],
+      additions: 0,
+      deletions: 0,
+      changeHash: input.source.id,
+      issueReferences: [],
+    };
+
+    const request: VerificationRequest = {
+      id: requestId,
+      projectId,
+      snapshotId: snapshot.id,
+      changeSetId,
+      requestedBy: { type: "source-platform" },
+      mode: "commit",
+      requestedChecks: [],
+      policyId: brandId("default") as VerificationRequest["policyId"],
+      priority: 0,
+      createdAt,
+    };
+
+    const job: VerificationJob = {
+      id: jobId,
+      requestId,
+      attempt: 1,
+      status: "queued",
+    };
+
+    const project: Project = {
+      id: projectId,
+      name: "",
+      root: ".",
+    };
+
+    return {
+      project,
+      snapshot,
+      changeSet,
+      detectionContext: createMemoryDetectionContext(resolved.sourceContents),
+      request,
+      job,
+      verificationId,
+      plannerConfig: input.plannerConfig,
+      selectedCheckIds: input.selectedCheckIds,
+      executionLimits: input.executionLimits,
+      dependencyProvisioning: input.dependencyProvisioning,
+      generatedArtifactRequirements: input.generatedArtifactRequirements,
+      generatedArtifactDestination: input.generatedArtifactDestination,
+    };
   }
 }

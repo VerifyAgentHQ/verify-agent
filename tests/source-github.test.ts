@@ -10,6 +10,14 @@ import {
 } from "../packages/adapters-source/src/github.js";
 import { InvalidSourceReferenceError } from "../packages/adapters-source/src/resolver.js";
 import { createVerificationApi } from "../apps/api/src/index.js";
+import {
+  FakeSandboxTransport,
+  createCheckExecutor,
+  createSandboxExecutorFromTransport,
+  createVerificationPipeline,
+  VerificationApplicationService,
+} from "../packages/engine/src/index.js";
+import { createProjectDetectionService } from "../packages/adapters-lang/src/index.js";
 import { request as httpRequest } from "node:http";
 
 const OWNER = "octocat";
@@ -314,33 +322,32 @@ describe("GitHub adapter contract", () => {
       sourceContents: FIXTURE_CONTENTS,
     });
     const resolver = createGitHubSourceResolver(githubProvider);
-
-    let received: unknown;
-    const api = createVerificationApi(
-      {
-        async verify(input) {
-          received = input;
-          return {
-            status: "pass",
-            coverage: {
-              verified: [],
-              partial: [],
-              unsupported: [],
-              notApplicable: [],
-            },
-            checkResults: [],
-            findingReferences: [],
-            evidenceReferences: [],
-            policyDecision: "pass",
-            summary: "ok",
-            resultVersion: "1.0.0",
-            contentHash: "hash",
-            createdAt: "2024-01-01T00:00:00Z",
-          };
-        },
-      },
+    const sandboxResult = {
+      schemaVersion: "1.0.0" as const,
+      jobId: "unused",
+      status: "completed" as const,
+      exitCode: 0,
+      durationMs: 5,
+      logsRef: "fixture://logs/composition",
+      artifactRefs: [],
+      resourceUsage: { memoryBytes: 0, cpuTimeMs: 1 },
+      errors: [],
+    };
+    const transport = new FakeSandboxTransport((request) => ({
+      ...sandboxResult,
+      jobId: request.jobId,
+    }));
+    const pipeline = createVerificationPipeline({
+      detector: createProjectDetectionService(),
+      executor: createCheckExecutor(
+        createSandboxExecutorFromTransport(transport),
+      ),
+    });
+    const applicationService = new VerificationApplicationService(
+      pipeline,
       resolver,
     );
+    const api = createVerificationApi(applicationService);
 
     await new Promise<void>((resolve, reject) =>
       api.server.listen(0, "127.0.0.1", () => resolve()),
@@ -379,15 +386,12 @@ describe("GitHub adapter contract", () => {
 
     await api.close();
     expect(result.status).toBe(200);
-    expect(
-      (
-        received as { detectionContext: { readFile: (p: string) => string } }
-      ).detectionContext.readFile("package.json"),
-    ).toBe(FIXTURE_CONTENTS["package.json"]);
-    expect(
-      (received as { snapshot: { source: { provider: string } } }).snapshot
-        .source.provider,
-    ).toBe("github");
+    expect(result.body.source).toEqual({ kind: "snapshot", id: encoded });
+    expect(result.body.status).toBe("needs_changes");
+    expect(result.body.checkResults).toHaveLength(1);
+    expect(JSON.stringify(result.body)).not.toContain("Bearer");
+    expect(JSON.stringify(result.body)).not.toContain("eyJ");
+    expect(JSON.stringify(result.body)).not.toContain("BEGIN PRIVATE KEY");
   });
 
   it("supports multiple fixtures deterministically", async () => {

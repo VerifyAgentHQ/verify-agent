@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolve } from "node:path";
 import {
   brandId,
+  InvalidSourceReferenceError,
   type CheckPlan,
   type ChangeSet,
   type RepositorySnapshot,
+  type SourceResolver,
   type VerificationRequest,
   type VerificationJob,
   type CheckResult,
@@ -87,6 +89,16 @@ function verificationInput() {
   };
 }
 
+function noopResolver(): SourceResolver {
+  return {
+    async resolveSnapshot() {
+      throw new InvalidSourceReferenceError(
+        "unexpected source resolution in verify-only test",
+      );
+    },
+  };
+}
+
 function buildService(
   response = sandboxResult,
   detector = createProjectDetectionService(),
@@ -101,6 +113,7 @@ function buildService(
   return {
     service: new VerificationApplicationService(
       createVerificationPipeline({ detector, executor }),
+      noopResolver(),
     ),
     transport,
   };
@@ -204,7 +217,10 @@ describe("verification application service", () => {
         },
       },
     });
-    const appService = new VerificationApplicationService(pipeline);
+    const appService = new VerificationApplicationService(
+      pipeline,
+      noopResolver(),
+    );
 
     const result = await appService.verify({
       ...verificationInput(),
@@ -273,7 +289,10 @@ describe("verification application service", () => {
       planner: { plan: () => plan },
       executor,
     });
-    const appService = new VerificationApplicationService(pipeline);
+    const appService = new VerificationApplicationService(
+      pipeline,
+      noopResolver(),
+    );
 
     const aggOutput = await appService.verify({
       ...verificationInput(),
@@ -282,5 +301,224 @@ describe("verification application service", () => {
 
     expect(aggOutput.checkResults).toBeDefined();
     expect(aggOutput.checkResults.length).toBe(2);
+  });
+});
+
+describe("verifySource with an injected SourceResolver", () => {
+  const sourceId =
+    "octocat:hello-world:da39a3ee5e6b4b0d3255bfef95601890afd80709";
+  const source = { kind: "snapshot" as const, id: sourceId };
+  const resolvedSnapshot: RepositorySnapshot = {
+    id: brandId<"RepositorySnapshotId">(
+      "octocat--hello-world--da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    ),
+    projectId: brandId<"ProjectId">("octocat--hello-world"),
+    source: {
+      provider: "github",
+      reference: "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    },
+    sourceState: {
+      type: "commit",
+      value: "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    },
+    commitSha: "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    retrievedAt: "2026-08-31T10:00:00Z",
+  };
+  const resolvedContents = {
+    "package.json": JSON.stringify({
+      name: "verify-source-fixture",
+      devDependencies: { typescript: "5.0.0" },
+    }),
+    "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
+    "src/index.ts": "export const value = 42;\n",
+  };
+
+  function buildVerifySourceService(options?: {
+    resolveSnapshot?: SourceResolver["resolveSnapshot"];
+    response?: unknown;
+  }) {
+    const successResult = (request: { jobId: string }) => ({
+      ...sandboxResult,
+      jobId: request.jobId,
+    });
+    const transport = new FakeSandboxTransport(
+      options?.response instanceof Error
+        ? successResult
+        : (options?.response ?? successResult),
+      options?.response instanceof Error ? options.response : undefined,
+    );
+    const executor = createCheckExecutor(
+      createSandboxExecutorFromTransport(transport),
+    );
+    const pipeline = createVerificationPipeline({
+      detector: createProjectDetectionService(),
+      executor,
+    });
+    const service = new VerificationApplicationService(pipeline, {
+      resolveSnapshot:
+        options?.resolveSnapshot ??
+        (async () => ({
+          snapshot: resolvedSnapshot,
+          sourceContents: resolvedContents,
+        })),
+    });
+    return { service, transport };
+  }
+
+  it("calls the injected SourceResolver with the exact provider-neutral reference", async () => {
+    const resolveSnapshot = vi.fn(async () => ({
+      snapshot: resolvedSnapshot,
+      sourceContents: resolvedContents,
+    }));
+    const { service } = buildVerifySourceService({ resolveSnapshot });
+
+    const result = await service.verifySource({ source });
+
+    expect(resolveSnapshot).toHaveBeenCalledTimes(1);
+    expect(resolveSnapshot).toHaveBeenCalledWith(source);
+    expect(result).toBeDefined();
+  });
+
+  it("feeds the resolved snapshot into the existing verification pipeline", async () => {
+    const { service, transport } = buildVerifySourceService();
+
+    const result = await service.verifySource({ source });
+
+    expect(transport.requests).toHaveLength(1);
+    expect(result.snapshotId).toBe(resolvedSnapshot.id);
+    expect(result.projectId).toBe(resolvedSnapshot.projectId);
+    expect(result.checkResults.length).toBeGreaterThanOrEqual(1);
+    expect(result.status).toBe("needs_changes");
+  });
+
+  it("builds the detection context from the resolved source contents", async () => {
+    const { service } = buildVerifySourceService();
+
+    const result = await service.verifySource({ source });
+
+    expect(result.coverage.simulated).toContain("typescript.typecheck");
+    expect(result.checkResults.length).toBe(1);
+  });
+
+  it("works with a non-GitHub fake SourceResolver (provider neutrality)", async () => {
+    const resolveSnapshot = vi.fn(async () => ({
+      snapshot: {
+        ...resolvedSnapshot,
+        source: { provider: "fixture", reference: "static-snapshot" },
+        sourceState: { type: "snapshot", value: "static-snapshot" },
+      },
+      sourceContents: resolvedContents,
+    }));
+    const { service } = buildVerifySourceService({ resolveSnapshot });
+
+    const result = await service.verifySource({
+      source: { kind: "snapshot", id: "static-snapshot" },
+    });
+
+    expect(resolveSnapshot).toHaveBeenCalledWith({
+      kind: "snapshot",
+      id: "static-snapshot",
+    });
+    expect(result).toBeDefined();
+    expect(result.snapshotId).toBe(resolvedSnapshot.id);
+  });
+
+  it("propagates InvalidSourceReferenceError from the resolver unchanged", async () => {
+    const { service } = buildVerifySourceService({
+      resolveSnapshot: async () => {
+        throw new InvalidSourceReferenceError("unknown repository");
+      },
+    });
+
+    await expect(service.verifySource({ source })).rejects.toBeInstanceOf(
+      InvalidSourceReferenceError,
+    );
+    await expect(service.verifySource({ source })).rejects.toMatchObject({
+      name: "InvalidSourceReferenceError",
+    });
+  });
+
+  it("rejects an invalid source reference before calling the resolver", async () => {
+    const resolveSnapshot = vi.fn();
+    const { service } = buildVerifySourceService({ resolveSnapshot });
+
+    await expect(
+      service.verifySource({ source: { kind: "repo", id: "x" } } as never),
+    ).rejects.toMatchObject({ name: "InvalidSourceReferenceError" });
+    await expect(
+      service.verifySource({ source: { kind: "snapshot", id: "" } }),
+    ).rejects.toMatchObject({ name: "InvalidSourceReferenceError" });
+    expect(resolveSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("maps unexpected resolver failures to a distinct application error", async () => {
+    const { service } = buildVerifySourceService({
+      resolveSnapshot: async () => {
+        throw new Error("network down");
+      },
+    });
+
+    await expect(service.verifySource({ source })).rejects.toMatchObject({
+      name: "VerificationApplicationServiceError",
+      code: "source_resolution_failed",
+      message: "Source resolution failed",
+    });
+  });
+
+  it("keeps source-resolution failures distinguishable from verification failures", async () => {
+    const { service: failingResolution } = buildVerifySourceService({
+      resolveSnapshot: async () => {
+        throw new Error("resolver exploded");
+      },
+    });
+    await expect(
+      failingResolution.verifySource({ source }),
+    ).rejects.toMatchObject({
+      name: "VerificationApplicationServiceError",
+      code: "source_resolution_failed",
+    });
+
+    const { service: failingVerification } = buildVerifySourceService({
+      response: new Error("transport offline"),
+    });
+    await expect(
+      failingVerification.verifySource({ source }),
+    ).rejects.toMatchObject({
+      name: "VerificationApplicationServiceError",
+      code: "execution_failed",
+    });
+  });
+
+  it("does not leak credentials or resolver internals into the result", async () => {
+    const { service } = buildVerifySourceService({
+      resolveSnapshot: async () => ({
+        snapshot: resolvedSnapshot,
+        sourceContents: {
+          ...resolvedContents,
+          ".env":
+            "GITHUB_TOKEN=ghs_synthetic_abc\nAPP_JWT=eyJhbGciOiJSUzI1NiJ9",
+        },
+      }),
+    });
+
+    const result = await service.verifySource({ source });
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain("ghs_");
+    expect(serialized).not.toContain("eyJ");
+    expect(serialized).not.toContain("BEGIN PRIVATE KEY");
+    expect(serialized).not.toContain("Authorization");
+    expect(serialized).not.toContain("Bearer");
+  });
+
+  it("produces stable content hashes for the same source", async () => {
+    const { service } = buildVerifySourceService();
+
+    const first = await service.verifySource({ source });
+    const second = await service.verifySource({ source });
+
+    expect(first.contentHash).toBe(second.contentHash);
+    expect(first.status).toBe(second.status);
+    expect(first.id).toBe(second.id);
   });
 });
