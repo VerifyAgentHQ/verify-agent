@@ -50,6 +50,11 @@ export {
   VerificationPipelineError,
 } from "./pipeline.js";
 export {
+  VerificationApplicationService,
+  VerificationApplicationServiceError,
+} from "./application-service.js";
+export type { VerifyRepositorySnapshotRequest } from "./application-service.js";
+export {
   aggregateVerification,
   aggregationInputFromPipeline,
   coverageForPlan,
