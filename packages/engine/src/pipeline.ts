@@ -47,6 +47,8 @@ export interface VerificationPipelineInput {
   readonly detectionContext: DetectionContext;
   readonly plannerConfig?: PlannerConfig;
   readonly selectedCheckId?: CheckId;
+  /** Optional deterministic subset; items retain CheckPlan order. */
+  readonly selectedCheckIds?: readonly CheckId[];
   readonly executionLimits?: ExecutionLimits;
   readonly jobId: string;
   readonly executionId: string;
@@ -70,6 +72,9 @@ export interface VerificationPipelineOutput {
   readonly execution: CheckExecutionOutcome["execution"];
   readonly sandboxRequest: CheckExecutionOutcome["request"];
   readonly checkResult: CheckExecutionOutcome["result"];
+  readonly executions: readonly CheckExecutionOutcome["execution"][];
+  readonly sandboxRequests: readonly CheckExecutionOutcome["request"][];
+  readonly checkResults: readonly CheckExecutionOutcome["result"][];
   readonly executionEnvironment?: ExecutionEnvironment;
   readonly provisioningStatus: ProvisioningStatus;
 }
@@ -99,9 +104,12 @@ function createInitialExecution(
   input: VerificationPipelineInput,
   item: CheckPlanItem,
   environment?: ExecutionEnvironment,
+  index = 0,
 ): CheckExecution {
   return {
-    id: brandId<"CheckExecutionId">(input.executionId),
+    id: brandId<"CheckExecutionId">(
+      index === 0 ? input.executionId : `${input.executionId}-${index}`,
+    ),
     checkDefinitionId: item.checkId,
     jobId: brandId<"VerificationJobId">(input.jobId),
     inputsHash: stableHash({
@@ -154,22 +162,48 @@ export function createVerificationPipeline(
         );
       }
       const plan = planner.plan(detected.profile, input.plannerConfig);
-      const selectedCheckId =
-        input.selectedCheckId ?? brandId<"CheckId">("typescript.typecheck");
-      const selectedItem = plan.items.find(
-        (item) => item.checkId === selectedCheckId,
-      );
-      if (!selectedItem || selectedItem.applicability !== "applicable")
+      const selectedCheckIds = input.selectedCheckIds ?? [
+        input.selectedCheckId ?? brandId<"CheckId">("typescript.typecheck"),
+      ];
+      if (selectedCheckIds.length === 0) {
         throw new VerificationPipelineError(
           "no_applicable_check",
-          `No applicable planned check: ${String(selectedCheckId)}`,
+          "No checks were selected for execution",
         );
-      const definition = definitions.find(selectedItem.checkId);
-      if (!definition)
+      }
+      const selectedSet = new Set(selectedCheckIds.map(String));
+      if (selectedSet.size !== selectedCheckIds.length)
         throw new VerificationPipelineError(
-          "execution_failed",
-          `No definition for planned check: ${String(selectedItem.checkId)}`,
+          "no_applicable_check",
+          "Duplicate checks cannot be executed",
         );
+      const selectedItems = plan.items.filter(
+        (item) => selectedSet.has(String(item.checkId)),
+      );
+      if (
+        selectedItems.length !== selectedCheckIds.length ||
+        selectedItems.some((item) => item.applicability !== "applicable")
+      )
+        throw new VerificationPipelineError(
+          "no_applicable_check",
+          `No applicable planned check: ${selectedCheckIds
+            .filter(
+              (checkId) =>
+                !selectedItems.some((item) => item.checkId === checkId),
+            )
+            .map(String)
+            .join(", ")}`,
+        );
+      const selectedItem = selectedItems[0];
+      const definitionsForItems = selectedItems.map((item) => {
+        const definition = definitions.find(item.checkId);
+        if (!definition)
+          throw new VerificationPipelineError(
+            "execution_failed",
+            `No definition for planned check: ${String(item.checkId)}`,
+          );
+        return definition;
+      });
       let executionEnvironment: ExecutionEnvironment | undefined;
       let provisioningStatus: ProvisioningStatus = "not_started";
       if (input.dependencyProvisioning) {
@@ -256,31 +290,38 @@ export function createVerificationPipeline(
           );
         }
       }
-      let outcome: CheckExecutionOutcome;
-      try {
-        outcome = await dependencies.executor.execute({
-          project: input.project,
-          profile: detected.profile,
-          snapshot: input.snapshot,
-          planItem: selectedItem,
-          definition,
-          execution: createInitialExecution(
-            input,
-            selectedItem,
-            executionEnvironment,
-          ),
-          resultId: input.resultId,
-          createdAt: input.createdAt,
-          limits: input.executionLimits ?? DEFAULT_EXECUTION_LIMITS,
-          executionEnvironment,
-        });
-      } catch (error) {
-        throw new VerificationPipelineError(
-          "execution_failed",
-          `Check execution failed: ${String(selectedCheckId)}`,
-          error,
-        );
+      const outcomes: CheckExecutionOutcome[] = [];
+      for (const [index, item] of selectedItems.entries()) {
+        try {
+          outcomes.push(
+            await dependencies.executor.execute({
+              project: input.project,
+              profile: detected.profile,
+              snapshot: input.snapshot,
+              planItem: item,
+              definition: definitionsForItems[index],
+              execution: createInitialExecution(
+                input,
+                item,
+                executionEnvironment,
+                index,
+              ),
+              resultId:
+                index === 0 ? input.resultId : `${input.resultId}-${index}`,
+              createdAt: input.createdAt,
+              limits: input.executionLimits ?? DEFAULT_EXECUTION_LIMITS,
+              executionEnvironment,
+            }),
+          );
+        } catch (error) {
+          throw new VerificationPipelineError(
+            "execution_failed",
+            `Check execution failed: ${String(item.checkId)}`,
+            error,
+          );
+        }
       }
+      const outcome = outcomes[0];
       return {
         project: input.project,
         snapshot: input.snapshot,
@@ -291,6 +332,9 @@ export function createVerificationPipeline(
         execution: outcome.execution,
         sandboxRequest: outcome.request,
         checkResult: outcome.result,
+        executions: Object.freeze(outcomes.map(({ execution }) => execution)),
+        sandboxRequests: Object.freeze(outcomes.map(({ request }) => request)),
+        checkResults: Object.freeze(outcomes.map(({ result }) => result)),
         executionEnvironment,
         provisioningStatus,
       };

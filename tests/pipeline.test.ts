@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import {
   brandId,
+  type CheckPlan,
   type ChangeSet,
   type RepositorySnapshot,
 } from "../packages/domain/src/index.js";
@@ -263,5 +264,63 @@ describe("first end-to-end verification pipeline", () => {
       }),
     ).rejects.toMatchObject({ code: "dependency_provisioning_failed" });
     expect(transport.requests).toHaveLength(0);
+  });
+
+  it("executes selected checks in deterministic plan order", async () => {
+    const checkIds = [
+      brandId<"CheckId">("typescript.typecheck"),
+      brandId<"CheckId">("typescript.lint"),
+      brandId<"CheckId">("typescript.test"),
+    ] as const;
+    const plan: CheckPlan = {
+      planId: brandId<"CheckPlanId">("multi-check-plan"),
+      plannerVersion: "test-planner",
+      projectId: project.id,
+      snapshotId: snapshot.id,
+      items: checkIds.map((checkId, priority) => ({
+        checkId,
+        checkVersion: "1.0.0",
+        applicability: "applicable" as const,
+        required: true,
+        reason: "controlled multi-check test",
+        priority,
+        dependencies: [],
+        scope: "project" as const,
+      })),
+      createdAt: "2026-08-31T10:00:00Z",
+      contentHash: "b".repeat(64),
+    };
+    const transport = new FakeSandboxTransport((request) => ({
+      ...result,
+      jobId: request.jobId,
+    }));
+    const service = createVerificationPipeline({
+      detector: createProjectDetectionService(),
+      planner: { plan: () => plan },
+      executor: createCheckExecutor(
+        createSandboxExecutorFromTransport(transport),
+      ),
+    });
+
+    const output = await service.verify({
+      ...input(),
+      selectedCheckIds: checkIds,
+    });
+
+    expect(output.checkResults).toHaveLength(3);
+    expect(output.checkResults.map((check) => check.checkId)).toEqual(
+      checkIds,
+    );
+    expect(output.executions.map((execution) => execution.id)).toEqual([
+      "pipeline-execution",
+      "pipeline-execution-1",
+      "pipeline-execution-2",
+    ]);
+    expect(output.sandboxRequests.map((request) => request.commands[0])).toEqual([
+      expect.objectContaining({ executable: "pnpm", args: ["exec", "tsc", "--noEmit"] }),
+      expect.objectContaining({ executable: "pnpm", args: ["exec", "eslint", "."] }),
+      expect.objectContaining({ executable: "pnpm", args: ["exec", "vitest", "run"] }),
+    ]);
+    expect(transport.requests).toHaveLength(3);
   });
 });
