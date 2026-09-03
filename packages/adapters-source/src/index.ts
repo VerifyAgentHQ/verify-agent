@@ -31,3 +31,13 @@ export {
   encodeGitHubSnapshotReference,
   validateGitHubSnapshotReference,
 } from "./github.js";
+export type {
+  GitHubPullRequestDecision,
+  GitHubPullRequestEvent,
+  SupportedGitHubPullRequestAction,
+} from "./github-pr.js";
+export {
+  SUPPORTED_GITHUB_PR_ACTIONS,
+  decideGitHubPullRequestEvent,
+  isSupportedGitHubPullRequestAction,
+} from "./github-pr.js";
