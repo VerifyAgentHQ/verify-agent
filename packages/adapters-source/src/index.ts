@@ -41,3 +41,19 @@ export {
   decideGitHubPullRequestEvent,
   isSupportedGitHubPullRequestAction,
 } from "./github-pr.js";
+export type {
+  GitHubAppConfig,
+  GitHubAppJwtOptions,
+  GitHubAppInstallationTokenClient,
+  GitHubAppInstallationTokenClientOptions,
+  GitHubInstallationToken,
+} from "./github-app.js";
+export {
+  GitHubAppAuthenticationError,
+  GitHubAppConfigurationError,
+  GitHubInstallationTokenError,
+  createGitHubAppInstallationTokenClient,
+  createGitHubAppJwt,
+  readGitHubAppConfig,
+  verifyGitHubAppJwt,
+} from "./github-app.js";
