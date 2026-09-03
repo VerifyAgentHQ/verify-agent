@@ -1,5 +1,5 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   GitHubAppAuthenticationError,
   GitHubAppConfigurationError,
@@ -311,6 +311,30 @@ describe("GitHub App HTTP client", () => {
       fetch: fetchFn,
     });
     await expect(client.createInstallationToken(123)).resolves.toBeDefined();
+  });
+
+  it("rejects http apiBaseUrl before sending the App JWT", async () => {
+    const fetchFn = vi.fn(async () =>
+      createMockResponse(200, {
+        token: "ghs_test",
+        expires_at: "2024-01-01T00:00:00Z",
+      }),
+    );
+    let err: unknown;
+    try {
+      createGitHubAppInstallationTokenClient({
+        appConfig: VALID_CONFIG,
+        apiBaseUrl: "http://example.test",
+        fetch: fetchFn as never,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(GitHubAppConfigurationError);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(String(err)).not.toContain(VALID_CONFIG.privateKey);
+    expect(String(err)).not.toMatch(/eyJ/);
+    expect(String(err)).not.toContain("Authorization");
   });
 
   for (const status of [401, 403, 404, 429, 500]) {
