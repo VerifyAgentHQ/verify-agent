@@ -171,7 +171,9 @@ describe("gated real Stellar Forge execution", () => {
           maxMessageBytes: 1024 * 1024,
           maxStderrBytes: 64 * 1024,
         });
-        console.error("[stellar-forge-diag] Transport created, creating pipeline...");
+        console.error(
+          "[stellar-forge-diag] Transport created, creating pipeline...",
+        );
         console.error("[stellar-forge-diag] Running pipeline verify...");
         const output = await createVerificationPipeline({
           detector: createProjectDetectionService(),
@@ -204,8 +206,14 @@ describe("gated real Stellar Forge execution", () => {
             executionEnvironment: output.executionEnvironment,
           }),
         );
-        console.error("[stellar-forge-diag] Check result status:", output.checkResult.status);
-        console.error("[stellar-forge-diag] Check result executionSource:", output.checkResult.executionSource);
+        console.error(
+          "[stellar-forge-diag] Check result status:",
+          output.checkResult.status,
+        );
+        console.error(
+          "[stellar-forge-diag] Check result executionSource:",
+          output.checkResult.executionSource,
+        );
         expect(output.checkResult.status).toBe("passed");
         expect(output.checkResult.executionSource).toBe("real");
       } finally {

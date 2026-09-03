@@ -327,10 +327,7 @@ export function aggregationInputFromPipeline(
     job,
     profile: output.profile,
     plan: output.plan,
-    checkResults: [
-      ...output.checkResults,
-      ...(additionalCheckResults ?? []),
-    ],
+    checkResults: [...output.checkResults, ...(additionalCheckResults ?? [])],
     ...stableOptions,
   };
 }

@@ -308,18 +308,27 @@ describe("first end-to-end verification pipeline", () => {
     });
 
     expect(output.checkResults).toHaveLength(3);
-    expect(output.checkResults.map((check) => check.checkId)).toEqual(
-      checkIds,
-    );
+    expect(output.checkResults.map((check) => check.checkId)).toEqual(checkIds);
     expect(output.executions.map((execution) => execution.id)).toEqual([
       "pipeline-execution",
       "pipeline-execution-1",
       "pipeline-execution-2",
     ]);
-    expect(output.sandboxRequests.map((request) => request.commands[0])).toEqual([
-      expect.objectContaining({ executable: "pnpm", args: ["exec", "tsc", "--noEmit"] }),
-      expect.objectContaining({ executable: "pnpm", args: ["exec", "eslint", "."] }),
-      expect.objectContaining({ executable: "pnpm", args: ["exec", "vitest", "run"] }),
+    expect(
+      output.sandboxRequests.map((request) => request.commands[0]),
+    ).toEqual([
+      expect.objectContaining({
+        executable: "pnpm",
+        args: ["exec", "tsc", "--noEmit"],
+      }),
+      expect.objectContaining({
+        executable: "pnpm",
+        args: ["exec", "eslint", "."],
+      }),
+      expect.objectContaining({
+        executable: "pnpm",
+        args: ["exec", "vitest", "run"],
+      }),
     ]);
     expect(transport.requests).toHaveLength(3);
   });

@@ -177,8 +177,8 @@ export function createVerificationPipeline(
           "no_applicable_check",
           "Duplicate checks cannot be executed",
         );
-      const selectedItems = plan.items.filter(
-        (item) => selectedSet.has(String(item.checkId)),
+      const selectedItems = plan.items.filter((item) =>
+        selectedSet.has(String(item.checkId)),
       );
       if (
         selectedItems.length !== selectedCheckIds.length ||

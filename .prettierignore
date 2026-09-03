@@ -1,1 +1,2 @@
+operator-artifacts/
 tests/fixtures/project-detection/malformed-package-json/package.json
