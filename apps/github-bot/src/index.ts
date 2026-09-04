@@ -9,6 +9,7 @@ export {
   isSupportedGitHubPullRequestAction,
 } from "../../../packages/adapters-source/src/github-pr.js";
 export type {
+  ConfiguredGitHubWebhookHandlerOptions,
   GitHubWebhookHandlerOptions,
   GitHubWebhookHttpOptions,
   GitHubWebhookHttpResult,
@@ -17,12 +18,18 @@ export type {
   GitHubWebhookSuccess,
   GitHubWebhookVerificationOptions,
 } from "./webhook.js";
+export type {
+  GitHubVerificationOrchestrator,
+  GitHubVerificationOrchestrationResult,
+} from "./verification-orchestrator.js";
 export {
   GitHubWebhookAuthenticationError,
+  GitHubWebhookConfigurationError,
   GitHubWebhookPayloadError,
   GitHubWebhookReplayError,
   GitHubWebhookUnsupportedEventError,
   collectRawBody,
+  createConfiguredGitHubWebhookHandler,
   createGitHubWebhookHttpHandler,
   createInMemoryGitHubWebhookReplayGuard,
   handleGitHubWebhookHttpRequest,
@@ -33,6 +40,7 @@ export {
   readSingleHeaderFromIncomingMessage,
   verifyGitHubWebhookSignature,
 } from "./webhook.js";
+export { createGitHubVerificationOrchestrator } from "./verification-orchestrator.js";
 
 export const githubBotBoundary = {
   status: "implemented",

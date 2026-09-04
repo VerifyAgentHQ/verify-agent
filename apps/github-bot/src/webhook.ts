@@ -6,6 +6,7 @@ import {
   type GitHubPullRequestEvent,
 } from "../../../packages/adapters-source/src/github-pr.js";
 import { InvalidSourceReferenceError } from "../../../packages/adapters-source/src/resolver.js";
+import type { GitHubVerificationOrchestrator } from "./verification-orchestrator.js";
 
 export class GitHubWebhookAuthenticationError extends Error {
   constructor(message = "GitHub webhook authentication failed") {
@@ -32,6 +33,13 @@ export class GitHubWebhookReplayError extends Error {
   constructor(message = "GitHub webhook replay detected") {
     super(message);
     this.name = "GitHubWebhookReplayError";
+  }
+}
+
+export class GitHubWebhookConfigurationError extends Error {
+  constructor(message = "GitHub webhook configuration error") {
+    super(message);
+    this.name = "GitHubWebhookConfigurationError";
   }
 }
 
@@ -545,6 +553,7 @@ export interface GitHubWebhookHttpOptions {
   readonly secret: string;
   readonly maxBytes?: number;
   readonly replayGuard?: GitHubWebhookReplayGuard;
+  readonly orchestrator?: GitHubVerificationOrchestrator;
 }
 
 export interface GitHubWebhookHttpResult {
@@ -588,6 +597,27 @@ export async function handleGitHubWebhookHttpRequest(
     // readSingleHeader already throws on duplicate
 
     const rawBody = await collectRawBody(request, maxBytes);
+
+    if (options.orchestrator) {
+      const event = parseTrustedGitHubPullRequestEvent({
+        rawBody,
+        signatureHeader,
+        eventHeader,
+        deliveryHeader,
+        secret: options.secret,
+        maxBytes,
+        replayGuard: options.replayGuard,
+      });
+      const orchestration = await options.orchestrator.handle(event);
+      sendJson(response, 202, {
+        status: orchestration.kind === "ignored" ? "ignored" : "accepted",
+        deliveryId: deliveryHeader?.trim() ?? "",
+        ...(orchestration.kind === "ignored"
+          ? { reason: orchestration.reason }
+          : {}),
+      });
+      return;
+    }
 
     const result = handleGitHubWebhookRequest({
       rawBody,
@@ -647,4 +677,75 @@ export function createGitHubWebhookHttpHandler(
   return (request, response) => {
     void handleGitHubWebhookHttpRequest(request, response, options);
   };
+}
+
+export interface ConfiguredGitHubWebhookHandlerOptions {
+  readonly secret: string;
+  readonly orchestrator: GitHubVerificationOrchestrator;
+  readonly maxBytes?: number;
+  readonly replayGuard?: GitHubWebhookReplayGuard;
+}
+
+/**
+ * Production composition for the GitHub webhook boundary.
+ *
+ * Low-level `createGitHubWebhookHttpHandler` remains a reusable transport
+ * primitive where `orchestrator` is optional for transport-only,
+ * authentication-only, parser, and deterministic unit tests.
+ *
+ * Production composition is stricter: the orchestrator is mandatory and its
+ * omission fails fast during composition instead of silently acknowledging
+ * authenticated PR events without verification.
+ *
+ * Intended composition (owned by the composition root):
+ *
+ * ```text
+ * SourceResolver
+ *     ↓
+ * VerificationApplicationService
+ *     ↓
+ * GitHubVerificationOrchestrator
+ *     ↓
+ * createConfiguredGitHubWebhookHandler
+ * ```
+ *
+ * Execution remains synchronous with no queue, worker, persistence, or retry.
+ */
+export function createConfiguredGitHubWebhookHandler(
+  options: ConfiguredGitHubWebhookHandlerOptions,
+): (request: IncomingMessage, response: ServerResponse) => void {
+  if (!options || typeof options !== "object") {
+    throw new GitHubWebhookConfigurationError(
+      "GitHub webhook production configuration is required",
+    );
+  }
+  if (
+    typeof options.secret !== "string" ||
+    options.secret.trim().length === 0
+  ) {
+    throw new GitHubWebhookConfigurationError(
+      "GitHub webhook secret is required for production composition",
+    );
+  }
+  const orchestrator = (options as unknown as { orchestrator?: unknown })
+    .orchestrator;
+  if (
+    !orchestrator ||
+    typeof (orchestrator as GitHubVerificationOrchestrator).handle !==
+      "function"
+  ) {
+    throw new GitHubWebhookConfigurationError(
+      "GitHub webhook orchestrator is required for production composition",
+    );
+  }
+
+  const httpOptions: GitHubWebhookHttpOptions = {
+    secret: options.secret,
+    ...(options.maxBytes !== undefined ? { maxBytes: options.maxBytes } : {}),
+    ...(options.replayGuard !== undefined
+      ? { replayGuard: options.replayGuard }
+      : {}),
+    orchestrator: options.orchestrator,
+  };
+  return createGitHubWebhookHttpHandler(httpOptions);
 }
