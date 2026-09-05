@@ -165,8 +165,8 @@ Batch 9 Part 3 validated the configured Windows process path against the locally
 
 ### Future GitHub / AI / GOAT boundaries
 
-- GitHub integration is a future application integration, not part of the core engine.
-- AI reasoning is a separate provider-neutral layer. It interprets evidence but does not establish deterministic fact.
+- GitHub webhook authentication and source acquisition are implemented in `apps/github-bot` and `packages/adapters-source`. GitHub feedback posting (PR comments, status checks) is a future application integration.
+- AI reasoning is a separate provider-neutral layer. The service layer is implemented; no provider SDK is installed. It interprets evidence but does not establish deterministic fact.
 - GOAT remains a later phase and must not be required by the domain or engine packages.
 
 ## Architectural notes

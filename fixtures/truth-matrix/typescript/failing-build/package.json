@@ -1,0 +1,11 @@
+{
+  "name": "truth-failing-build-ts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
