@@ -53,6 +53,21 @@ export interface GitHubWebhookReplayGuard {
   readonly checkAndRemember: (deliveryId: string) => boolean;
   readonly isReplay: (deliveryId: string) => boolean;
   readonly size: () => number;
+
+  /**
+   * Atomically check if a delivery is unseen and mark it as reserved.
+   * Returns true if reserved (new delivery), false if already seen/reserved.
+   * After reserve(), the caller must call commit() or rollback().
+   *
+   * This enables two-phase replay coordination:
+   *   reserve() → enqueue → commit()   (success)
+   *   reserve() → enqueue fails → rollback()  (retryable)
+   */
+  readonly reserve: (deliveryId: string) => boolean;
+  /** Finalize a reserved delivery as consumed. */
+  readonly commit: (deliveryId: string) => void;
+  /** Remove reservation, making the delivery retryable. */
+  readonly rollback: (deliveryId: string) => void;
 }
 
 export function createInMemoryGitHubWebhookReplayGuard(options?: {
@@ -61,11 +76,11 @@ export function createInMemoryGitHubWebhookReplayGuard(options?: {
 }): GitHubWebhookReplayGuard {
   const maxEntries = options?.maxEntries ?? 1000;
   const ttlMs = options?.ttlMs ?? 10 * 60 * 1000;
-  const map = new Map<string, number>();
+  const map = new Map<string, number | "RESERVED">();
 
   function prune(now: number): void {
-    for (const [key, expires] of map.entries()) {
-      if (expires <= now) {
+    for (const [key, value] of map.entries()) {
+      if (value !== "RESERVED" && value <= now) {
         map.delete(key);
       }
     }
@@ -81,8 +96,8 @@ export function createInMemoryGitHubWebhookReplayGuard(options?: {
       const now = Date.now();
       prune(now);
       if (map.has(deliveryId)) {
-        const expires = map.get(deliveryId) as number;
-        if (expires > now) {
+        const expires = map.get(deliveryId) as number | "RESERVED";
+        if (expires === "RESERVED" || expires > now) {
           return true;
         }
         map.delete(deliveryId);
@@ -93,12 +108,35 @@ export function createInMemoryGitHubWebhookReplayGuard(options?: {
     isReplay(deliveryId: string): boolean {
       const now = Date.now();
       prune(now);
-      const expires = map.get(deliveryId);
-      return expires !== undefined && expires > now;
+      const value = map.get(deliveryId);
+      if (value === undefined) return false;
+      if (value === "RESERVED") return true;
+      return value > now;
     },
     size(): number {
       prune(Date.now());
       return map.size;
+    },
+    reserve(deliveryId: string): boolean {
+      const now = Date.now();
+      prune(now);
+      if (map.has(deliveryId)) {
+        return false;
+      }
+      map.set(deliveryId, "RESERVED");
+      return true;
+    },
+    commit(deliveryId: string): void {
+      const value = map.get(deliveryId);
+      if (value === "RESERVED") {
+        map.set(deliveryId, Date.now() + ttlMs);
+      }
+    },
+    rollback(deliveryId: string): void {
+      const value = map.get(deliveryId);
+      if (value === "RESERVED") {
+        map.delete(deliveryId);
+      }
     },
   };
 }
@@ -425,6 +463,24 @@ export function collectRawBody(
   });
 }
 
+function parseAuthenticatedGitHubPullRequestEvent(options: {
+  readonly rawBody: Buffer;
+  readonly deliveryHeader: string;
+  readonly eventHeader: string;
+}): GitHubPullRequestEvent {
+  if (options.eventHeader !== "pull_request") {
+    throw new GitHubWebhookUnsupportedEventError(
+      `unsupported event: ${options.eventHeader}`,
+    );
+  }
+
+  const payloadString = options.rawBody.toString("utf8");
+  const json = parseGitHubWebhookJson(payloadString);
+  const event = mapGitHubWebhookPayloadToEvent(json);
+
+  return event;
+}
+
 export function parseTrustedGitHubPullRequestEvent(options: {
   readonly rawBody: string | Buffer | Uint8Array;
   readonly signatureHeader: string | null;
@@ -448,7 +504,6 @@ export function parseTrustedGitHubPullRequestEvent(options: {
     );
   }
 
-  // Required header extraction before verification (event type and delivery)
   if (
     typeof options.deliveryHeader !== "string" ||
     options.deliveryHeader.trim().length === 0
@@ -599,23 +654,74 @@ export async function handleGitHubWebhookHttpRequest(
     const rawBody = await collectRawBody(request, maxBytes);
 
     if (options.orchestrator) {
-      const event = parseTrustedGitHubPullRequestEvent({
-        rawBody,
-        signatureHeader,
-        eventHeader,
-        deliveryHeader,
+      const deliveryId = deliveryHeader?.trim() ?? "";
+
+      const rawBodyBuffer =
+        typeof rawBody === "string"
+          ? Buffer.from(rawBody, "utf8")
+          : Buffer.isBuffer(rawBody)
+            ? rawBody
+            : Buffer.from(rawBody as Uint8Array);
+
+      if (rawBodyBuffer.length > maxBytes) {
+        throw new GitHubWebhookPayloadError(
+          `webhook payload exceeds ${maxBytes} bytes`,
+        );
+      }
+
+      if (
+        typeof deliveryHeader !== "string" ||
+        deliveryHeader.trim().length === 0
+      ) {
+        throw new GitHubWebhookReplayError("missing X-GitHub-Delivery");
+      }
+
+      if (typeof eventHeader !== "string" || eventHeader.trim().length === 0) {
+        throw new GitHubWebhookUnsupportedEventError("missing X-GitHub-Event");
+      }
+
+      verifyGitHubWebhookSignature({
         secret: options.secret,
-        maxBytes,
-        replayGuard: options.replayGuard,
+        signatureHeader,
+        payload: rawBodyBuffer,
       });
-      const orchestration = await options.orchestrator.handle(event);
-      sendJson(response, 202, {
-        status: orchestration.kind === "ignored" ? "ignored" : "accepted",
-        deliveryId: deliveryHeader?.trim() ?? "",
-        ...(orchestration.kind === "ignored"
-          ? { reason: orchestration.reason }
-          : {}),
-      });
+
+      let reserved = false;
+
+      if (options.replayGuard && deliveryId) {
+        reserved = options.replayGuard.reserve(deliveryId);
+        if (!reserved) {
+          sendJson(response, 409, { error: "replay detected" });
+          return;
+        }
+      }
+
+      try {
+        const event = parseAuthenticatedGitHubPullRequestEvent({
+          rawBody: rawBodyBuffer,
+          deliveryHeader: deliveryHeader.trim(),
+          eventHeader: eventHeader.trim(),
+        });
+
+        const orchestration = await options.orchestrator.handle(event, {
+          deliveryId,
+        });
+        if (options.replayGuard && deliveryId) {
+          options.replayGuard.commit(deliveryId);
+        }
+        sendJson(response, 202, {
+          status: orchestration.kind === "ignored" ? "ignored" : "accepted",
+          deliveryId,
+          ...(orchestration.kind === "ignored"
+            ? { reason: orchestration.reason }
+            : {}),
+        });
+      } catch (error) {
+        if (options.replayGuard && deliveryId && reserved) {
+          options.replayGuard.rollback(deliveryId);
+        }
+        throw error;
+      }
       return;
     }
 
@@ -695,21 +801,43 @@ export interface ConfiguredGitHubWebhookHandlerOptions {
  *
  * Production composition is stricter: the orchestrator is mandatory and its
  * omission fails fast during composition instead of silently acknowledging
- * authenticated PR events without verification.
+ * authenticated PR events without enqueueing verification work.
+ *
+ * The webhook never verifies synchronously. Authenticated supported events
+ * produce an immutable provider-neutral queue job which is handed to the
+ * injected `VerificationJobQueue`; the worker consumes that job through
+ * `VerificationApplicationService.verifySource`. Queue submission failure
+ * yields the generic safe server-error response and no success claim.
+ *
+ * Replay protection is coordinated with queue handoff via reserve/commit/rollback:
+ *   reserve() → enqueue → commit()   (success, delivery consumed)
+ *   reserve() → enqueue fails → rollback()  (delivery remains retryable)
+ *
+ * Replay protection is process-local, bounded, and not durable.
+ * Successful queue handoff commits the delivery as consumed.
+ * Failed queue handoff remains retryable.
+ * This is not durable exactly-once processing.
+ * Future durable infrastructure can use `deliveryId` for persistent idempotency.
  *
  * Intended composition (owned by the composition root):
  *
  * ```text
- * SourceResolver
- *     ↓
- * VerificationApplicationService
+ * VerificationJobQueue (in-memory for Batch 38; durable later)
  *     ↓
  * GitHubVerificationOrchestrator
  *     ↓
  * createConfiguredGitHubWebhookHandler
+ *
+ * VerificationQueueJob
+ *     ↓
+ * worker processor
+ *     ↓
+ * VerificationApplicationService.verifySource
  * ```
  *
- * Execution remains synchronous with no queue, worker, persistence, or retry.
+ * No queue infrastructure, worker loop, persistence, retry, or durability
+ * is provided in this batch; the in-memory adapter is explicitly
+ * non-durable.
  */
 export function createConfiguredGitHubWebhookHandler(
   options: ConfiguredGitHubWebhookHandlerOptions,

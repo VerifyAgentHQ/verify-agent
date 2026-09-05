@@ -6,6 +6,7 @@ import {
   GitHubWebhookReplayError,
   GitHubWebhookUnsupportedEventError,
   createInMemoryGitHubWebhookReplayGuard,
+  handleGitHubWebhookHttpRequest,
   handleGitHubWebhookRequest,
   parseTrustedGitHubPullRequestEvent,
   readGitHubWebhookSecret,
@@ -648,6 +649,298 @@ describe("GitHub webhook delivery/replay", () => {
     expect(guard.size()).toBe(2);
     // d1 should have been evicted (FIFO)
     expect(mk("d1")).not.toThrow();
+  });
+});
+
+describe("GitHub replay guard reserve/commit/rollback", () => {
+  it("reserve returns true for unseen delivery and false on duplicate", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    expect(guard.reserve("r1")).toBe(true);
+    expect(guard.reserve("r1")).toBe(false);
+    expect(guard.reserve("r2")).toBe(true);
+  });
+
+  it("commit finalizes reservation as consumed", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    expect(guard.reserve("r1")).toBe(true);
+    guard.commit("r1");
+    expect(guard.isReplay("r1")).toBe(true);
+    expect(guard.reserve("r1")).toBe(false);
+  });
+
+  it("rollback removes reservation making delivery retryable", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    expect(guard.reserve("r1")).toBe(true);
+    guard.rollback("r1");
+    expect(guard.isReplay("r1")).toBe(false);
+    expect(guard.reserve("r1")).toBe(true);
+  });
+
+  it("rollback is no-op for already committed delivery", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    expect(guard.reserve("r1")).toBe(true);
+    guard.commit("r1");
+    guard.rollback("r1");
+    expect(guard.isReplay("r1")).toBe(true);
+  });
+
+  it("rollback is no-op for unknown delivery", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    guard.rollback("unknown");
+    expect(guard.isReplay("unknown")).toBe(false);
+  });
+
+  it("checkAndRemember treats reserved delivery as replay", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    expect(guard.reserve("r1")).toBe(true);
+    expect(guard.checkAndRemember("r1")).toBe(true);
+  });
+
+  it("reserved delivery counts toward size", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard({ maxEntries: 3 });
+    guard.reserve("r1");
+    guard.reserve("r2");
+    expect(guard.size()).toBe(2);
+    guard.commit("r1");
+    expect(guard.size()).toBe(2);
+    guard.rollback("r2");
+    expect(guard.size()).toBe(1);
+  });
+
+  it("concurrent reserve with same delivery only succeeds once", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    expect(guard.reserve("r1")).toBe(true);
+    expect(guard.reserve("r1")).toBe(false);
+    guard.commit("r1");
+    expect(guard.reserve("r1")).toBe(false);
+  });
+
+  it("public parseTrustedGitHubPullRequestEvent enforces replay protection", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const payload = makePayload();
+    const sig = sign(payload);
+    parseTrustedGitHubPullRequestEvent({
+      rawBody: payload,
+      signatureHeader: sig,
+      eventHeader: "pull_request",
+      deliveryHeader: "delivery-enforced",
+      secret: SECRET,
+      replayGuard: guard,
+    });
+    expect(guard.isReplay("delivery-enforced")).toBe(true);
+    expect(() =>
+      parseTrustedGitHubPullRequestEvent({
+        rawBody: payload,
+        signatureHeader: sig,
+        eventHeader: "pull_request",
+        deliveryHeader: "delivery-enforced",
+        secret: SECRET,
+        replayGuard: guard,
+      }),
+    ).toThrow(GitHubWebhookReplayError);
+  });
+
+  it("commit(unknown) does not create a replay entry", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    guard.commit("unknown");
+    expect(guard.isReplay("unknown")).toBe(false);
+    expect(guard.size()).toBe(0);
+  });
+
+  it("commit(committed) does not corrupt state", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    expect(guard.reserve("r1")).toBe(true);
+    guard.commit("r1");
+    expect(guard.isReplay("r1")).toBe(true);
+    guard.commit("r1");
+    expect(guard.isReplay("r1")).toBe(true);
+    expect(guard.reserve("r1")).toBe(false);
+  });
+
+  it("stale commit after eviction does not recreate entry", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard({
+      maxEntries: 2,
+      ttlMs: 1,
+    });
+    guard.reserve("d1");
+    guard.reserve("d2");
+    guard.reserve("d3");
+    guard.commit("d3");
+    guard.commit("d1");
+    expect(guard.size()).toBe(2);
+    guard.commit("d1");
+    expect(guard.size()).toBe(2);
+  });
+});
+
+describe("authentication-before-reservation ordering (P2 fix)", () => {
+  it("invalid signature does not reserve delivery", async () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const payload = makePayload();
+    const badSig = "sha256=" + "0".repeat(64);
+    const { createServer, request: httpRequest } = await import("node:http");
+    const server = createServer((req, res) => {
+      void handleGitHubWebhookHttpRequest(req, res, {
+        secret: SECRET,
+        replayGuard: guard,
+        orchestrator: {
+          handle: async () => {
+            throw new Error("should not be called");
+          },
+        },
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address() as { port: number };
+    const result = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          port: addr.port,
+          method: "POST",
+          path: "/webhook",
+          headers: {
+            "x-hub-signature-256": badSig,
+            "x-github-event": "pull_request",
+            "x-github-delivery": "delivery-auth-first",
+          },
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+        },
+      );
+      req.on("error", reject);
+      req.end(payload);
+    });
+    await new Promise<void>((r) => server.close(() => r()));
+    expect(result.status).toBe(401);
+    expect(guard.isReplay("delivery-auth-first")).toBe(false);
+    expect(guard.size()).toBe(0);
+  });
+
+  it("invalid request cannot block concurrent valid request with same delivery", async () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const payload = makePayload();
+    const badSig = "sha256=" + "0".repeat(64);
+    const goodSig = sign(payload);
+    const delivery = "delivery-concurrent-p2";
+    let enqueued = false;
+    const { createServer, request: httpRequest } = await import("node:http");
+    const server = createServer((req, res) => {
+      void handleGitHubWebhookHttpRequest(req, res, {
+        secret: SECRET,
+        replayGuard: guard,
+        orchestrator: {
+          handle: async () => {
+            enqueued = true;
+            return { kind: "enqueued" as const };
+          },
+        },
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address() as { port: number };
+
+    const sendRequest = (sig: string): Promise<{ status: number }> =>
+      new Promise((resolve, reject) => {
+        const req = httpRequest(
+          {
+            port: addr.port,
+            method: "POST",
+            path: "/webhook",
+            headers: {
+              "x-hub-signature-256": sig,
+              "x-github-event": "pull_request",
+              "x-github-delivery": delivery,
+            },
+          },
+          (res) => {
+            res.on("data", () => {});
+            res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+          },
+        );
+        req.on("error", reject);
+        req.end(payload);
+      });
+
+    const invalidResult = await sendRequest(badSig);
+    expect(invalidResult.status).toBe(401);
+    expect(guard.isReplay(delivery)).toBe(false);
+
+    const validResult = await sendRequest(goodSig);
+    expect(validResult.status).toBe(202);
+    expect(enqueued).toBe(true);
+    expect(guard.isReplay(delivery)).toBe(true);
+
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  it("reservation is rolled back on parsing failure after authentication", async () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const badPayload = JSON.stringify({ not: "a valid pr payload" });
+    const sig = sign(badPayload);
+    const { createServer, request: httpRequest } = await import("node:http");
+    const server = createServer((req, res) => {
+      void handleGitHubWebhookHttpRequest(req, res, {
+        secret: SECRET,
+        replayGuard: guard,
+        orchestrator: {
+          handle: async () => {
+            throw new Error("should not be called");
+          },
+        },
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address() as { port: number };
+    const result = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          port: addr.port,
+          method: "POST",
+          path: "/webhook",
+          headers: {
+            "x-hub-signature-256": sig,
+            "x-github-event": "pull_request",
+            "x-github-delivery": "delivery-parse-fail",
+          },
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+        },
+      );
+      req.on("error", reject);
+      req.end(badPayload);
+    });
+    await new Promise<void>((r) => server.close(() => r()));
+    expect(result.status).toBe(400);
+    expect(guard.isReplay("delivery-parse-fail")).toBe(false);
+  });
+
+  it("public parseTrustedGitHubPullRequestEvent still enforces replay", () => {
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const payload = makePayload();
+    const sig = sign(payload);
+    parseTrustedGitHubPullRequestEvent({
+      rawBody: payload,
+      signatureHeader: sig,
+      eventHeader: "pull_request",
+      deliveryHeader: "delivery-public-replay",
+      secret: SECRET,
+      replayGuard: guard,
+    });
+    expect(guard.isReplay("delivery-public-replay")).toBe(true);
+    expect(() =>
+      parseTrustedGitHubPullRequestEvent({
+        rawBody: payload,
+        signatureHeader: sig,
+        eventHeader: "pull_request",
+        deliveryHeader: "delivery-public-replay",
+        secret: SECRET,
+        replayGuard: guard,
+      }),
+    ).toThrow(GitHubWebhookReplayError);
   });
 });
 
