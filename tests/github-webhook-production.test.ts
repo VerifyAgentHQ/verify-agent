@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createGitHubVerificationOrchestrator } from "../apps/github-bot/src/verification-orchestrator.js";
 import {
   GitHubWebhookConfigurationError,
@@ -8,13 +8,14 @@ import {
   createGitHubWebhookHttpHandler,
   createInMemoryGitHubWebhookReplayGuard,
 } from "../apps/github-bot/src/webhook.js";
-import type { VerificationResult } from "../packages/domain/src/verification.js";
+import { createInMemoryVerificationJobQueue } from "../packages/engine/src/in-memory-job-queue.js";
 
 const SHA = "a".repeat(40);
 const BASE = "b".repeat(40);
-const SECRET = "batch37a-production-test-secret";
+const SECRET = "batch38-production-test-secret";
 const OWNER = "octocat";
 const REPOSITORY = "hello-world";
+const CREATED_AT = "2026-02-01T00:00:00.000Z";
 
 function signedPayload(action: string): string {
   return JSON.stringify({
@@ -32,8 +33,14 @@ function signatureFor(payload: string): string {
   return `sha256=${createHmac("sha256", SECRET).update(payload).digest("hex")}`;
 }
 
-function result(): VerificationResult {
-  return {} as VerificationResult;
+function createOrchestrator() {
+  const queue = createInMemoryVerificationJobQueue();
+  let counter = 0;
+  const orchestrator = createGitHubVerificationOrchestrator(queue, {
+    createJobId: () => `job-prod-${(counter += 1)}`,
+    now: () => CREATED_AT,
+  });
+  return { queue, orchestrator };
 }
 
 function postWebhook(
@@ -119,8 +126,7 @@ describe("production GitHub webhook composition", () => {
   });
 
   it("fails immediately when the secret is missing without leaking secrets", () => {
-    const verifySource = vi.fn(async () => result());
-    const orchestrator = createGitHubVerificationOrchestrator({ verifySource });
+    const { orchestrator } = createOrchestrator();
     try {
       createConfiguredGitHubWebhookHandler({
         secret: "",
@@ -146,16 +152,10 @@ describe("production GitHub webhook composition", () => {
     }
   });
 
-  it("routes an authenticated supported PR to verifySource exactly once", async () => {
+  it("enqueues exactly one job for an authenticated supported PR and returns 202", async () => {
     const payload = signedPayload("opened");
-    const verifySource = vi.fn(async ({ source }: { source: unknown }) => {
-      expect(source).toEqual({
-        kind: "snapshot",
-        id: `${OWNER}:${REPOSITORY}:${SHA}`,
-      });
-      return result();
-    });
-    const orchestrator = createGitHubVerificationOrchestrator({ verifySource });
+    const delivery = "delivery-prod-1";
+    const { queue, orchestrator } = createOrchestrator();
     const handler = createConfiguredGitHubWebhookHandler({
       secret: SECRET,
       replayGuard: createInMemoryGitHubWebhookReplayGuard(),
@@ -163,17 +163,32 @@ describe("production GitHub webhook composition", () => {
     });
 
     await withServer(handler, async (port) => {
-      const response = await postWebhook(port, payload, signatureFor(payload));
+      const response = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        delivery,
+      );
       expect(response.status).toBe(202);
-      expect(verifySource).toHaveBeenCalledTimes(1);
+      expect(queue.size()).toBe(1);
+      const job = queue.jobs[0];
+      expect(job.source).toEqual({
+        kind: "snapshot",
+        id: `${OWNER}:${REPOSITORY}:${SHA}`,
+      });
+      expect(job.deliveryId).toBe(delivery);
+      expect(JSON.parse(response.body)).toMatchObject({
+        status: "accepted",
+        deliveryId: delivery,
+      });
     });
   });
 
-  it("does not invoke verifySource for invalid signatures", async () => {
-    const verifySource = vi.fn(async () => result());
+  it("does not enqueue for invalid signatures", async () => {
+    const { queue, orchestrator } = createOrchestrator();
     const handler = createConfiguredGitHubWebhookHandler({
       secret: SECRET,
-      orchestrator: createGitHubVerificationOrchestrator({ verifySource }),
+      orchestrator,
     });
 
     await withServer(handler, async (port) => {
@@ -183,24 +198,185 @@ describe("production GitHub webhook composition", () => {
         `sha256=${"0".repeat(64)}`,
       );
       expect(response.status).toBe(401);
-      expect(verifySource).not.toHaveBeenCalled();
+      expect(queue.size()).toBe(0);
     });
   });
 
-  it("does not invoke verifySource for unsupported actions", async () => {
+  it("does not enqueue for unsupported actions and preserves ignored behavior", async () => {
     const payload = signedPayload("closed");
-    const verifySource = vi.fn(async () => result());
+    const { queue, orchestrator } = createOrchestrator();
     const handler = createConfiguredGitHubWebhookHandler({
       secret: SECRET,
       replayGuard: createInMemoryGitHubWebhookReplayGuard(),
-      orchestrator: createGitHubVerificationOrchestrator({ verifySource }),
+      orchestrator,
     });
 
     await withServer(handler, async (port) => {
       const response = await postWebhook(port, payload, signatureFor(payload));
       expect(response.status).toBe(202);
       expect(JSON.parse(response.body)).toMatchObject({ status: "ignored" });
-      expect(verifySource).not.toHaveBeenCalled();
+      expect(queue.size()).toBe(0);
+    });
+  });
+
+  it("does not enqueue replayed deliveries", async () => {
+    const payload = signedPayload("opened");
+    const { queue, orchestrator } = createOrchestrator();
+    const handler = createConfiguredGitHubWebhookHandler({
+      secret: SECRET,
+      replayGuard: createInMemoryGitHubWebhookReplayGuard(),
+      orchestrator,
+    });
+
+    await withServer(handler, async (port) => {
+      const first = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        "delivery-replay-38",
+      );
+      expect(first.status).toBe(202);
+      expect(queue.size()).toBe(1);
+      const second = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        "delivery-replay-38",
+      );
+      expect(second.status).toBe(409);
+      expect(queue.size()).toBe(1);
+    });
+  });
+
+  it("returns safe server error without enqueueing when the queue fails", async () => {
+    const payload = signedPayload("opened");
+    const failingQueue = {
+      enqueue: async () => {
+        throw new Error("queue backend exploded with secret-material");
+      },
+    };
+    const orchestrator = createGitHubVerificationOrchestrator(
+      failingQueue as never,
+    );
+    const handler = createConfiguredGitHubWebhookHandler({
+      secret: SECRET,
+      replayGuard: createInMemoryGitHubWebhookReplayGuard(),
+      orchestrator,
+    });
+
+    await withServer(handler, async (port) => {
+      const response = await postWebhook(port, payload, signatureFor(payload));
+      expect(response.status).toBe(500);
+      expect(response.body).toContain("internal server error");
+      expect(response.body).not.toContain("secret-material");
+      expect(response.body).not.toContain(SECRET);
+    });
+  });
+
+  it("queue failure leaves delivery retryable", async () => {
+    const payload = signedPayload("opened");
+    const delivery = "delivery-retry-after-fail";
+    let failFirst = true;
+    const conditionalQueue = {
+      enqueue: async () => {
+        if (failFirst) {
+          failFirst = false;
+          throw new Error("transient queue failure");
+        }
+      },
+    };
+    const orchestrator = createGitHubVerificationOrchestrator(
+      conditionalQueue as never,
+    );
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const handler = createConfiguredGitHubWebhookHandler({
+      secret: SECRET,
+      replayGuard: guard,
+      orchestrator,
+    });
+
+    await withServer(handler, async (port) => {
+      const first = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        delivery,
+      );
+      expect(first.status).toBe(500);
+      expect(first.body).toContain("internal server error");
+
+      expect(guard.isReplay(delivery)).toBe(false);
+
+      const second = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        delivery,
+      );
+      expect(second.status).toBe(202);
+      expect(JSON.parse(second.body)).toMatchObject({ status: "accepted" });
+    });
+  });
+
+  it("successful enqueue records replay state and prevents retry", async () => {
+    const payload = signedPayload("opened");
+    const delivery = "delivery-success-replay";
+    const { queue, orchestrator } = createOrchestrator();
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const handler = createConfiguredGitHubWebhookHandler({
+      secret: SECRET,
+      replayGuard: guard,
+      orchestrator,
+    });
+
+    await withServer(handler, async (port) => {
+      const first = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        delivery,
+      );
+      expect(first.status).toBe(202);
+      expect(queue.size()).toBe(1);
+      expect(guard.isReplay(delivery)).toBe(true);
+
+      const second = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        delivery,
+      );
+      expect(second.status).toBe(409);
+      expect(queue.size()).toBe(1);
+    });
+  });
+
+  it("invalid signature does not consume replay state", async () => {
+    const payload = signedPayload("opened");
+    const delivery = "delivery-invalid-sig-no-replay";
+    const guard = createInMemoryGitHubWebhookReplayGuard();
+    const { queue, orchestrator } = createOrchestrator();
+    const handler = createConfiguredGitHubWebhookHandler({
+      secret: SECRET,
+      replayGuard: guard,
+      orchestrator,
+    });
+
+    await withServer(handler, async (port) => {
+      const badSig = `sha256=${"0".repeat(64)}`;
+      const first = await postWebhook(port, payload, badSig, delivery);
+      expect(first.status).toBe(401);
+      expect(guard.isReplay(delivery)).toBe(false);
+      expect(guard.size()).toBe(0);
+
+      const second = await postWebhook(
+        port,
+        payload,
+        signatureFor(payload),
+        delivery,
+      );
+      expect(second.status).toBe(202);
+      expect(queue.size()).toBe(1);
     });
   });
 });
@@ -214,19 +390,19 @@ describe("production omission regression (Codex P3)", () => {
     ).toThrow(GitHubWebhookConfigurationError);
   });
 
-  it("production composition with orchestrator verifies an authenticated PR", async () => {
+  it("production composition with orchestrator enqueues an authenticated PR", async () => {
     const payload = signedPayload("synchronize");
-    const verifySource = vi.fn(async () => result());
+    const { queue, orchestrator } = createOrchestrator();
     const handler = createConfiguredGitHubWebhookHandler({
       secret: SECRET,
       replayGuard: createInMemoryGitHubWebhookReplayGuard(),
-      orchestrator: createGitHubVerificationOrchestrator({ verifySource }),
+      orchestrator,
     });
 
     await withServer(handler, async (port) => {
       const response = await postWebhook(port, payload, signatureFor(payload));
       expect(response.status).toBe(202);
-      expect(verifySource).toHaveBeenCalledTimes(1);
+      expect(queue.size()).toBe(1);
     });
   });
 });

@@ -9,8 +9,9 @@ Accepted
 The GitHub webhook boundary may inject a `GitHubVerificationOrchestrator` after
 webhook authentication. The orchestrator accepts only the authenticated
 `GitHubPullRequestEvent`, delegates action handling to
-`decideGitHubPullRequestEvent`, and delegates supported immutable snapshot
-verification to `VerificationApplicationService.verifySource`.
+`decideGitHubPullRequestEvent`, and (as of Batch 38) enqueues a supported
+immutable snapshot as a provider-neutral `VerificationQueueJob` instead of
+verifying synchronously. See ADR-0008 for the queue and worker boundary.
 
 The HTTP transport remains responsible for authentication, raw-body handling,
 and safe acknowledgement responses. The orchestrator does not authenticate,

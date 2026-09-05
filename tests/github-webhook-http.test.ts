@@ -699,6 +699,11 @@ describe("GitHub webhook unexpected errors", () => {
       },
       isReplay: () => false,
       size: () => 0,
+      reserve: () => {
+        throw new Error("internal secret failure with token ghp_xxx");
+      },
+      commit: () => {},
+      rollback: () => {},
     } as unknown as ReturnType<typeof createInMemoryGitHubWebhookReplayGuard>;
     const server = createServer((req, res) => {
       void handleGitHubWebhookHttpRequest(req, res, {

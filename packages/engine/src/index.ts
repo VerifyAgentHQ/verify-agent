@@ -57,6 +57,8 @@ export type {
   VerifyRepositorySnapshotRequest,
   VerifySourceRequest,
 } from "./application-service.js";
+export { createInMemoryVerificationJobQueue } from "./in-memory-job-queue.js";
+export type { InMemoryVerificationJobQueue } from "./in-memory-job-queue.js";
 export {
   aggregateVerification,
   aggregationInputFromPipeline,
