@@ -615,7 +615,49 @@ Note: With simulated execution, healthy fixtures produce `needs_changes` (not `p
 
 ---
 
-## 16. Overclaim warning
+## 16. Batch 40: CheckExecutor subprocess integration
+
+Batch 40 adds gated integration tests that exercise `createCheckExecutor` through the real `SubprocessSandboxTransport` using the test harness fixture.
+
+### What Batch 40 proves
+
+- **Full CheckExecutor pipeline**: `SubprocessSandboxTransport` → `createSandboxExecutorFromTransport` → `createCheckExecutor` composes correctly end-to-end
+- **State machine correctness**: `CheckExecution` transitions from `queued` → `running` → `completed` (or `failed`) through real subprocess execution
+- **Provenance preservation**: `executionSource: "real"` is correctly propagated from transport through executor to final `CheckResult`
+- **Exit code propagation**: Non-zero exit codes from subprocess correctly produce `failed` check status
+- **Result assembly**: `mapSandboxJobResultToCheckResult` correctly maps sandbox results to domain `CheckResult` with content hash and metrics
+
+### What Batch 40 does NOT prove
+
+- **Real verify-sandbox binary**: The tests use the test harness fixture (`sandbox-harness.mjs`), not the production verify-sandbox binary
+- **Real toolchain execution**: Commands are not actually executed by TypeScript/Rust toolchains
+- **Sandbox process lifecycle**: No Docker, no network isolation, no resource enforcement
+
+### How to run
+
+```bash
+# Run with test harness (spawns Node.js subprocess)
+pnpm test -- tests/check-executor.integration.test.ts
+
+# Run with real verify-sandbox binary (requires environment setup)
+VERIFY_SANDBOX_PROCESS=/path/to/verify-sandbox \
+VERIFY_SANDBOX_SNAPSHOT_ROOT=/path/to/snapshots \
+VERIFY_SANDBOX_DOCKER_EXECUTABLE=/usr/bin/docker \
+VERIFY_SANDBOX_DOCKER_HOST=unix:///var/run/docker.sock \
+VERIFY_SANDBOX_SYSTEM_ROOT=/system \
+VERIFY_SANDBOX_TEMP_ROOT=/tmp \
+pnpm test -- tests/check-executor.integration.test.ts
+```
+
+### Test coverage
+
+- 3 integration tests (gated behind `VERIFY_SANDBOX_INTEGRATION=1` or `VERIFY_SANDBOX_PROCESS`)
+- Tests are skipped when gate environment variables are not set
+- No network, GitHub, or external sandbox required for basic gating
+
+---
+
+## 17. Overclaim warning
 
 > Passing VerifyAgent's unit/integration tests does not by itself prove that VerifyAgent correctly verifies arbitrary repositories.
 
