@@ -14,20 +14,20 @@ VerifyAgent is a TypeScript monorepo (pnpm workspaces) in Phase 0 bootstrap. It 
 
 ### What actually exists
 
-| Package                    | Status                    | Detail                                                                                                                                                             |
-| -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/domain`          | FULLY IMPLEMENTED         | 19 source files. Branded IDs, validation, immutability, entity model. ~750+ lines.                                                                                 |
-| `packages/engine`          | 13/14 IMPLEMENTED         | Pipeline, execution, aggregation, application service, dependency provisioning, generated artifacts, environment materializer. Only `runtime.ts` is a legacy stub. |
+| Package                    | Status                    | Detail                                                                                                                                                                                         |
+| -------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/domain`          | FULLY IMPLEMENTED         | 19 source files. Branded IDs, validation, immutability, entity model. ~750+ lines.                                                                                                             |
+| `packages/engine`          | 13/14 IMPLEMENTED         | Pipeline, execution, aggregation, application service, dependency provisioning, generated artifacts, environment materializer. Only `runtime.ts` is a legacy stub.                             |
 | `packages/checks`          | FULLY IMPLEMENTED         | 11 check definitions, deterministic planner, 8 execution specs mapping IDs to commands; 3 defined checks (`dependency.audit`, `security.analysis`, `license.analysis`) await executable specs. |
-| `packages/policy`          | FULLY IMPLEMENTED         | Deterministic default policy evaluator with 5 rules. Provider-independent.                                                                                         |
-| `packages/ai`              | SERVICE LAYER IMPLEMENTED | Provider-neutral prompt construction, output validation, contradiction detection, caching. No provider SDK installed (by design).                                  |
-| `packages/config`          | TYPE DEFINITIONS ONLY     | Interface definitions for `VerificationConfig` and `AppConfig`.                                                                                                    |
-| `packages/adapters-lang`   | FULLY IMPLEMENTED         | TypeScript + Rust detectors, filesystem + memory detection contexts.                                                                                               |
-| `packages/adapters-source` | FULLY IMPLEMENTED         | GitHub API provider, GitHub App JWT auth, PR event parsing, fixture/in-memory providers.                                                                           |
-| `packages/goat`            | PLACEHOLDER               | Single 4-line file reserving namespace.                                                                                                                            |
-| `apps/api`                 | FULLY IMPLEMENTED         | HTTP server (raw Node.js `http`), full wiring, health + verify endpoints.                                                                                          |
-| `apps/github-bot`          | FULLY IMPLEMENTED         | Webhook HMAC-SHA256 verification, replay guard, orchestrator, production composition.                                                                              |
-| `apps/worker`              | FULLY IMPLEMENTED         | 31-line boundary processor delegating to `VerificationApplicationService`.                                                                                         |
+| `packages/policy`          | FULLY IMPLEMENTED         | Deterministic default policy evaluator with 5 rules. Provider-independent.                                                                                                                     |
+| `packages/ai`              | SERVICE LAYER IMPLEMENTED | Provider-neutral prompt construction, output validation, contradiction detection, caching. No provider SDK installed (by design).                                                              |
+| `packages/config`          | TYPE DEFINITIONS ONLY     | Interface definitions for `VerificationConfig` and `AppConfig`.                                                                                                                                |
+| `packages/adapters-lang`   | FULLY IMPLEMENTED         | TypeScript + Rust detectors, filesystem + memory detection contexts.                                                                                                                           |
+| `packages/adapters-source` | FULLY IMPLEMENTED         | GitHub API provider, GitHub App JWT auth, PR event parsing, fixture/in-memory providers.                                                                                                       |
+| `packages/goat`            | PLACEHOLDER               | Single 4-line file reserving namespace.                                                                                                                                                        |
+| `apps/api`                 | FULLY IMPLEMENTED         | HTTP server (raw Node.js `http`), full wiring, health + verify endpoints.                                                                                                                      |
+| `apps/github-bot`          | FULLY IMPLEMENTED         | Webhook HMAC-SHA256 verification, replay guard, orchestrator, production composition.                                                                                                          |
+| `apps/worker`              | FULLY IMPLEMENTED         | 31-line boundary processor delegating to `VerificationApplicationService`.                                                                                                                     |
 
 ### What does not exist
 
@@ -75,44 +75,44 @@ GitHub feedback
 
 ### Stage-by-stage classification
 
-| Stage                            | Classification  | Files                                                                                 | What works                                                                                                                                                   | What does not work                                                                                                               |
-| -------------------------------- | --------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| **GitHub PR**                    | IMPLEMENTED     | `packages/adapters-source/github-pr.ts`                                               | Parses PR events (opened/synchronize/reopened), extracts head SHA, maps to provider-neutral source reference                                                 | None — full parsing works                                                                                                        |
-| **Authentication**               | IMPLEMENTED     | `apps/github-bot/webhook.ts`, `packages/adapters-source/github-app.ts`                | HMAC-SHA256 webhook verification with timing-safe comparison; RS256 JWT creation for GitHub App; installation token acquisition                              | None — cryptographic operations are real and tested                                                                              |
-| **Immutable source acquisition** | IMPLEMENTED     | `packages/adapters-source/github.ts`, `packages/adapters-source/github-app.ts`        | Fetches commit, tree, blobs via GitHub REST API; base64 decoding; binary detection; file/byte limits; path safety enforcement                                | None for the API path — but real GitHub App credentials are required at runtime                                                  |
-| **Verification job**             | IMPLEMENTED     | `packages/domain/verification-queue.ts`, `packages/engine/src/in-memory-job-queue.ts` | Validates queue job shape, creates frozen immutable jobs, preserves insertion order                                                                          | No durable queue (Redis, SQS, etc.) — only in-memory                                                                             |
-| **Worker**                       | PARTIAL         | `apps/worker/index.ts`                                                                | Validates queue job, delegates to `VerificationApplicationService.verifySource()`                                                                            | No background loop, no retry, no polling, no graceful shutdown                                                                   |
-| **Project detection**            | IMPLEMENTED     | `packages/adapters-lang/detectors.ts`, `packages/adapters-lang/service.ts`            | Static filesystem scanning for TypeScript/JavaScript and Rust/Soroban; aggregates observations into `ProjectProfile` with capabilities and confidence        | No execution-based detection (e.g., running `node -v`)                                                                           |
-| **Check planning**               | IMPLEMENTED     | `packages/checks/planner.ts`                                                          | Deterministic plan from `ProjectProfile`; priorities, dependency ordering, required/optional/disabled overrides, content hashing                             | None — fully deterministic                                                                                                       |
-| **Static verification**          | IMPLEMENTED     | `packages/checks/catalog.ts`, `packages/checks/execution-specs.ts`                    | 11 check definitions; 8 have trusted executable specifications (commands in `execution-specs.ts`)                                | 3 defined checks (`dependency.audit`, `security.analysis`, `license.analysis`) await executable specifications; no execution against real repos |
-| **Secure execution**             | PARTIAL         | `packages/engine/src/sandbox-transport.ts`, `packages/engine/src/execution.ts`        | `SubprocessSandboxTransport` spawns a child process with bounded I/O, timeout, abort; `CheckExecutor` maps checks to sandbox requests; lifecycle enforcement | Requires an external `verify-sandbox` process or Docker; integration tests are gated by env vars and mostly skipped in normal CI |
-| **Evidence collection**          | IMPLEMENTED     | `packages/engine/src/aggregation.ts`                                                  | `evidenceForCheckResult()` produces deterministic traceable evidence; `findingsForCheckResults()` creates evidence-backed findings for failures              | Evidence exists only from synthetic check results in normal test runs                                                            |
-| **Policy**                       | IMPLEMENTED     | `packages/policy/default.ts`                                                          | `evaluateDefaultPolicy()` with 5 deterministic rules; `DeterministicPolicyEvaluator` class                                                                   | No configurable policy beyond the default rules                                                                                  |
-| **VerificationResult**           | IMPLEMENTED     | `packages/engine/src/aggregation.ts`                                                  | `aggregateVerification()` assembles immutable `VerificationResult` with coverage, evidence, findings, policy decision                                        | Results are only produced from synthetic check results in normal test runs                                                       |
-| **GitHub feedback**              | NOT IMPLEMENTED | None                                                                                  | Nothing                                                                                                                                                      | No PR comments, no status checks, no commit statuses                                                                             |
+| Stage                            | Classification  | Files                                                                                 | What works                                                                                                                                                   | What does not work                                                                                                                              |
+| -------------------------------- | --------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GitHub PR**                    | IMPLEMENTED     | `packages/adapters-source/github-pr.ts`                                               | Parses PR events (opened/synchronize/reopened), extracts head SHA, maps to provider-neutral source reference                                                 | None — full parsing works                                                                                                                       |
+| **Authentication**               | IMPLEMENTED     | `apps/github-bot/webhook.ts`, `packages/adapters-source/github-app.ts`                | HMAC-SHA256 webhook verification with timing-safe comparison; RS256 JWT creation for GitHub App; installation token acquisition                              | None — cryptographic operations are real and tested                                                                                             |
+| **Immutable source acquisition** | IMPLEMENTED     | `packages/adapters-source/github.ts`, `packages/adapters-source/github-app.ts`        | Fetches commit, tree, blobs via GitHub REST API; base64 decoding; binary detection; file/byte limits; path safety enforcement                                | None for the API path — but real GitHub App credentials are required at runtime                                                                 |
+| **Verification job**             | IMPLEMENTED     | `packages/domain/verification-queue.ts`, `packages/engine/src/in-memory-job-queue.ts` | Validates queue job shape, creates frozen immutable jobs, preserves insertion order                                                                          | No durable queue (Redis, SQS, etc.) — only in-memory                                                                                            |
+| **Worker**                       | PARTIAL         | `apps/worker/index.ts`                                                                | Validates queue job, delegates to `VerificationApplicationService.verifySource()`                                                                            | No background loop, no retry, no polling, no graceful shutdown                                                                                  |
+| **Project detection**            | IMPLEMENTED     | `packages/adapters-lang/detectors.ts`, `packages/adapters-lang/service.ts`            | Static filesystem scanning for TypeScript/JavaScript and Rust/Soroban; aggregates observations into `ProjectProfile` with capabilities and confidence        | No execution-based detection (e.g., running `node -v`)                                                                                          |
+| **Check planning**               | IMPLEMENTED     | `packages/checks/planner.ts`                                                          | Deterministic plan from `ProjectProfile`; priorities, dependency ordering, required/optional/disabled overrides, content hashing                             | None — fully deterministic                                                                                                                      |
+| **Static verification**          | IMPLEMENTED     | `packages/checks/catalog.ts`, `packages/checks/execution-specs.ts`                    | 11 check definitions; 8 have trusted executable specifications (commands in `execution-specs.ts`)                                                            | 3 defined checks (`dependency.audit`, `security.analysis`, `license.analysis`) await executable specifications; no execution against real repos |
+| **Secure execution**             | PARTIAL         | `packages/engine/src/sandbox-transport.ts`, `packages/engine/src/execution.ts`        | `SubprocessSandboxTransport` spawns a child process with bounded I/O, timeout, abort; `CheckExecutor` maps checks to sandbox requests; lifecycle enforcement | Requires an external `verify-sandbox` process or Docker; integration tests are gated by env vars and mostly skipped in normal CI                |
+| **Evidence collection**          | IMPLEMENTED     | `packages/engine/src/aggregation.ts`                                                  | `evidenceForCheckResult()` produces deterministic traceable evidence; `findingsForCheckResults()` creates evidence-backed findings for failures              | Evidence exists only from synthetic check results in normal test runs                                                                           |
+| **Policy**                       | IMPLEMENTED     | `packages/policy/default.ts`                                                          | `evaluateDefaultPolicy()` with 5 deterministic rules; `DeterministicPolicyEvaluator` class                                                                   | No configurable policy beyond the default rules                                                                                                 |
+| **VerificationResult**           | IMPLEMENTED     | `packages/engine/src/aggregation.ts`                                                  | `aggregateVerification()` assembles immutable `VerificationResult` with coverage, evidence, findings, policy decision                                        | Results are only produced from synthetic check results in normal test runs                                                                      |
+| **GitHub feedback**              | NOT IMPLEMENTED | None                                                                                  | Nothing                                                                                                                                                      | No PR comments, no status checks, no commit statuses                                                                                            |
 
 ---
 
 ## 3. Capability matrix
 
-| Capability                    | Status          | Evidence                                                                                                                                    | Production-ready?                                   |
-| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| GitHub webhook authentication | IMPLEMENTED     | `apps/github-bot/webhook.ts:verifyGitHubWebhookSignature()` — HMAC-SHA256, timing-safe comparison, tested in 40+ assertions                 | Yes (boundary proven)                               |
-| Replay protection             | IMPLEMENTED     | `apps/github-bot/webhook.ts:createInMemoryGitHubWebhookReplayGuard()` — TTL-based with reserve/commit/rollback, bounded retention           | Boundary proven; needs durable store for production |
-| Immutable SHA identity        | IMPLEMENTED     | `packages/adapters-source/github-pr.ts` — head SHA extracted, validated (40-char hex), used as `SourceReference.snapshotId`                 | Yes                                                 |
-| GitHub App auth               | IMPLEMENTED     | `packages/adapters-source/github-app.ts:createGitHubAppJwt()` — RS256 JWT, installation token acquisition, tested with real RSA keys        | Boundary proven; needs real credentials at runtime  |
-| Source snapshot acquisition   | IMPLEMENTED     | `packages/adapters-source/github.ts:createGitHubApiSourceProvider()` — fetches commit/tree/blobs, base64 decode, binary detect, path safety | Boundary proven; needs real GitHub App + network    |
-| Verification job creation     | IMPLEMENTED     | `packages/domain/verification-queue.ts:createVerificationQueueJob()` — frozen immutable job with validation                                 | Yes                                                 |
-| Queue boundary                | PARTIAL         | `packages/engine/src/in-memory-job-queue.ts` — ordered, frozen, in-memory                                                                   | No durability; not production-ready                 |
-| Worker boundary               | PARTIAL         | `apps/worker/index.ts` — validates + delegates to application service                                                                       | No loop, retry, or lifecycle management             |
-| Project detection             | IMPLEMENTED     | `packages/adapters-lang/detectors.ts` — TypeScript + Rust static detection against fixture files                                            | Yes (boundary proven)                               |
-| Check planning                | IMPLEMENTED     | `packages/checks/planner.ts` — deterministic, content-hashed, dependency-ordered                                                            | Yes                                                 |
-| Static checks                 | IMPLEMENTED     | `packages/checks/catalog.ts` + `execution-specs.ts` — 11 definitions; 8 with executable specs                                      | Definitions exist; 3 checks (`dependency.audit`, `security.analysis`, `license.analysis`) await executable specs; execution is synthetic in tests  |
-| Secure execution              | PARTIAL         | `packages/engine/src/sandbox-transport.ts` — real subprocess transport, bounded I/O                                                         | Requires external `verify-sandbox` process          |
-| Evidence                      | IMPLEMENTED     | `packages/engine/src/aggregation.ts:evidenceForCheckResult()` — deterministic, content-hashed                                               | Yes (boundary proven)                               |
-| Policy                        | IMPLEMENTED     | `packages/policy/default.ts:evaluateDefaultPolicy()` — deterministic, 5 rules                                                               | Yes                                                 |
-| Final verification result     | IMPLEMENTED     | `packages/engine/src/aggregation.ts:aggregateVerification()` — immutable result assembly                                                    | Yes (boundary proven)                               |
-| GitHub feedback               | NOT IMPLEMENTED | None                                                                                                                                        | No                                                  |
+| Capability                    | Status          | Evidence                                                                                                                                    | Production-ready?                                                                                                                                 |
+| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub webhook authentication | IMPLEMENTED     | `apps/github-bot/webhook.ts:verifyGitHubWebhookSignature()` — HMAC-SHA256, timing-safe comparison, tested in 40+ assertions                 | Yes (boundary proven)                                                                                                                             |
+| Replay protection             | IMPLEMENTED     | `apps/github-bot/webhook.ts:createInMemoryGitHubWebhookReplayGuard()` — TTL-based with reserve/commit/rollback, bounded retention           | Boundary proven; needs durable store for production                                                                                               |
+| Immutable SHA identity        | IMPLEMENTED     | `packages/adapters-source/github-pr.ts` — head SHA extracted, validated (40-char hex), used as `SourceReference.snapshotId`                 | Yes                                                                                                                                               |
+| GitHub App auth               | IMPLEMENTED     | `packages/adapters-source/github-app.ts:createGitHubAppJwt()` — RS256 JWT, installation token acquisition, tested with real RSA keys        | Boundary proven; needs real credentials at runtime                                                                                                |
+| Source snapshot acquisition   | IMPLEMENTED     | `packages/adapters-source/github.ts:createGitHubApiSourceProvider()` — fetches commit/tree/blobs, base64 decode, binary detect, path safety | Boundary proven; needs real GitHub App + network                                                                                                  |
+| Verification job creation     | IMPLEMENTED     | `packages/domain/verification-queue.ts:createVerificationQueueJob()` — frozen immutable job with validation                                 | Yes                                                                                                                                               |
+| Queue boundary                | PARTIAL         | `packages/engine/src/in-memory-job-queue.ts` — ordered, frozen, in-memory                                                                   | No durability; not production-ready                                                                                                               |
+| Worker boundary               | PARTIAL         | `apps/worker/index.ts` — validates + delegates to application service                                                                       | No loop, retry, or lifecycle management                                                                                                           |
+| Project detection             | IMPLEMENTED     | `packages/adapters-lang/detectors.ts` — TypeScript + Rust static detection against fixture files                                            | Yes (boundary proven)                                                                                                                             |
+| Check planning                | IMPLEMENTED     | `packages/checks/planner.ts` — deterministic, content-hashed, dependency-ordered                                                            | Yes                                                                                                                                               |
+| Static checks                 | IMPLEMENTED     | `packages/checks/catalog.ts` + `execution-specs.ts` — 11 definitions; 8 with executable specs                                               | Definitions exist; 3 checks (`dependency.audit`, `security.analysis`, `license.analysis`) await executable specs; execution is synthetic in tests |
+| Secure execution              | PARTIAL         | `packages/engine/src/sandbox-transport.ts` — real subprocess transport, bounded I/O                                                         | Requires external `verify-sandbox` process                                                                                                        |
+| Evidence                      | IMPLEMENTED     | `packages/engine/src/aggregation.ts:evidenceForCheckResult()` — deterministic, content-hashed                                               | Yes (boundary proven)                                                                                                                             |
+| Policy                        | IMPLEMENTED     | `packages/policy/default.ts:evaluateDefaultPolicy()` — deterministic, 5 rules                                                               | Yes                                                                                                                                               |
+| Final verification result     | IMPLEMENTED     | `packages/engine/src/aggregation.ts:aggregateVerification()` — immutable result assembly                                                    | Yes (boundary proven)                                                                                                                             |
+| GitHub feedback               | NOT IMPLEMENTED | None                                                                                                                                        | No                                                                                                                                                |
 
 ---
 
@@ -522,18 +522,18 @@ real TypeScript E2E
 real Rust/Soroban E2E
 ```
 
-| Batch      | Focus                                                      | Rationale                                                                                 |
-| ---------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **39**     | Truth-matrix execution harness + verification-pipeline integration | Connect existing pipeline (detection → planning → execution → evidence → policy → VerificationResult) and run against known-truth fixtures |
-| **40**     | Real verify-sandbox lifecycle integration                  | Integrate external sandbox process for real command execution                             |
-| **41**     | Evidence/provenance validation using real execution results | Validate evidence model against actual sandbox output                                     |
-| **42**     | Policy + VerificationResult validation against the truth matrix | Prove policy decisions and final results match known expected outcomes                    |
-| **43**     | Real TypeScript/JavaScript end-to-end verification         | Run `tsc --noEmit`, `eslint`, `vitest` against real snapshot in sandbox, produce real evidence |
-| **44**     | Real Rust/Soroban end-to-end verification                  | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`            |
-| **45+**    | Durable queue + worker lifecycle + production hardening    | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                          |
-| **Later**  | GitHub feedback                                            | PR comments, status checks                                                                |
-| **Later**  | AI-assisted reasoning                                      | Provider integration, prompt optimization                                                 |
-| **Later**  | Additional ecosystem support                               | Python, Go, Solidity, etc.                                                                |
+| Batch     | Focus                                                              | Rationale                                                                                                                                                                 |
+| --------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **39**    | Truth-matrix execution harness + verification-pipeline integration | **DONE.** Deterministic harness exercises detection → planning → execution-boundary → evidence → policy → result against 7 known-truth fixtures with simulated execution. |
+| **40**    | Real verify-sandbox lifecycle integration                          | Integrate external sandbox process for real command execution                                                                                                             |
+| **41**    | Evidence/provenance validation using real execution results        | Validate evidence model against actual sandbox output                                                                                                                     |
+| **42**    | Policy + VerificationResult validation against the truth matrix    | Prove policy decisions and final results match known expected outcomes                                                                                                    |
+| **43**    | Real TypeScript/JavaScript end-to-end verification                 | Run `tsc --noEmit`, `eslint`, `vitest` against real snapshot in sandbox, produce real evidence                                                                            |
+| **44**    | Real Rust/Soroban end-to-end verification                          | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`                                                                                            |
+| **45+**   | Durable queue + worker lifecycle + production hardening            | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                                                                                                           |
+| **Later** | GitHub feedback                                                    | PR comments, status checks                                                                                                                                                |
+| **Later** | AI-assisted reasoning                                              | Provider integration, prompt optimization                                                                                                                                 |
+| **Later** | Additional ecosystem support                                       | Python, Go, Solidity, etc.                                                                                                                                                |
 
 ### Why this order
 
@@ -550,7 +550,72 @@ The sequence moves from connecting existing components → proving them through 
 
 ---
 
-## 15. Overclaim warning
+## 15. Batch 39: Truth-matrix integration harness
+
+Batch 39 provides a deterministic truth-matrix integration harness that exercises the existing verification pipeline against the 7 known-truth fixtures.
+
+### What Batch 39 proves
+
+- **Pipeline composition**: The existing detection → planning → execution-boundary → evidence → policy → result pipeline composes correctly end-to-end
+- **Detection correctness**: `createProjectDetectionService()` correctly identifies TypeScript and Rust ecosystems from fixture files
+- **Planning correctness**: `createCheckPlanner()` produces correct applicable checks for each ecosystem
+- **Execution-spec resolution**: `createTrustedExecutionSpecRegistry()` maps check IDs to trusted commands; 3 definition-only checks (`dependency.audit`, `security.analysis`, `license.analysis`) correctly have no execution spec
+- **Evidence aggregation**: `aggregateVerification()` produces deterministic evidence and findings from check results
+- **Policy evaluation**: `evaluateDefaultPolicy()` correctly triggers `required-check-failure` for failing checks and `non-real-required-execution` for simulated execution
+- **VerificationResult assembly**: The full pipeline produces immutable, content-hashed `VerificationResult` with correct status, coverage, and policy decision
+
+### What Batch 39 does NOT prove
+
+- **Real sandbox execution**: The harness uses a deterministic test adapter (`executionSource: "simulated"`), not real command execution
+- **Arbitrary repository correctness**: The fixtures are controlled known-truth snapshots, not arbitrary repositories
+- **Sandbox reliability**: No real sandbox process is involved; Batch 40 handles this
+
+### Harness architecture
+
+```text
+fixture source files
+  ↓
+createFileSystemDetectionContext()  [real, from @verify-agent/adapters-lang]
+  ↓
+createProjectDetectionService()    [real, from @verify-agent/adapters-lang]
+  ↓
+createCheckPlanner()               [real, from @verify-agent/checks]
+  ↓
+createDeterministicTestExecutor()  [test adapter — simulated execution]
+  ↓
+createVerificationPipeline()       [real, from @verify-agent/engine]
+  ↓
+aggregateVerification()            [real, from @verify-agent/engine]
+  ↓
+evaluateDefaultPolicy()            [real, from @verify-agent/policy]
+  ↓
+VerificationResult                 [immutable, content-hashed]
+```
+
+### Expected results with simulated execution
+
+| Fixture                      | VerificationStatus | Policy outcome | Coverage          |
+| ---------------------------- | ------------------ | -------------- | ----------------- |
+| TypeScript healthy           | `needs_changes`    | allow          | simulated         |
+| TypeScript failing-test      | `blocked`          | block          | partial+simulated |
+| TypeScript failing-typecheck | `blocked`          | block          | partial           |
+| TypeScript failing-build     | `blocked`          | block          | partial+simulated |
+| Rust healthy                 | `needs_changes`    | allow          | simulated         |
+| Rust failing-test            | `blocked`          | block          | partial+simulated |
+| Rust failing-build           | `blocked`          | block          | partial           |
+
+Note: With simulated execution, healthy fixtures produce `needs_changes` (not `pass`) because the `non-real-required-execution` policy rule correctly prevents simulated results from satisfying required production verification coverage.
+
+### Test isolation
+
+- No GitHub, network, or external sandbox required
+- No dependency provisioning or Docker required
+- Deterministic across runs (content-hashed results)
+- 60 tests covering architecture guardrails, detection, planning, execution-specs, evidence, policy, and VerificationResult
+
+---
+
+## 16. Overclaim warning
 
 > Passing VerifyAgent's unit/integration tests does not by itself prove that VerifyAgent correctly verifies arbitrary repositories.
 
