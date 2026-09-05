@@ -15,7 +15,7 @@ Each fixture is a known-truth repository snapshot that:
 3. Is intended to be provisioned with offline dependencies (or have no dependencies)
 4. Is intended to be executed in the sandbox with `networkPolicy: none`
 
-> **Current status**: The source fixtures are deterministic inputs with known expected outcomes. The TypeScript fixtures depend on packages (TypeScript, Vitest, etc.) without committed lockfiles or approved dependency artifacts, so they currently require dependency provisioning before execution. Offline/reproducible execution will be established later as part of real sandbox/execution integration. The truth matrix is currently a specification/fixture set, not yet a completed end-to-end execution harness.
+> **Current status (Batch 39)**: The source fixtures are deterministic inputs with known expected outcomes. Batch 39 provides a deterministic integration harness that exercises the existing detection → planning → execution-boundary → evidence → policy → result composition using controlled test execution results. This proves pipeline composition correctness but does not prove real sandbox execution. Batch 40 remains responsible for real `verify-sandbox` lifecycle integration.
 
 ## TypeScript / JavaScript fixtures
 
@@ -129,7 +129,25 @@ Each fixture is a known-truth repository snapshot that:
 
 ## How to use these fixtures
 
-### 1. Manual verification (requires external sandbox)
+### 1. Deterministic integration harness (Batch 39)
+
+The truth-matrix test suite (`tests/truth-matrix.test.ts`) exercises the existing verification pipeline against all 7 fixtures using a deterministic test adapter:
+
+```bash
+pnpm test -- tests/truth-matrix.test.ts
+```
+
+The harness wires:
+
+- **Detection**: `createProjectDetectionService()` from `@verify-agent/adapters-lang`
+- **Planning**: `createCheckPlanner()` from `@verify-agent/checks`
+- **Execution**: Deterministic test adapter (`executionSource: "simulated"`)
+- **Evidence**: `aggregateVerification()` from `@verify-agent/engine`
+- **Policy**: `evaluateDefaultPolicy()` from `@verify-agent/policy`
+
+This is integration validation, not real sandbox execution. The test adapter produces structured results based on fixture metadata.
+
+### 2. Manual verification (requires external sandbox)
 
 With a configured sandbox process:
 
