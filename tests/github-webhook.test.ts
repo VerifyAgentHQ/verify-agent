@@ -760,7 +760,7 @@ describe("GitHub replay guard reserve/commit/rollback", () => {
   it("stale commit after eviction does not recreate entry", () => {
     const guard = createInMemoryGitHubWebhookReplayGuard({
       maxEntries: 2,
-      ttlMs: 1,
+      ttlMs: 100,
     });
     guard.reserve("d1");
     guard.reserve("d2");

@@ -522,18 +522,18 @@ real TypeScript E2E
 real Rust/Soroban E2E
 ```
 
-| Batch     | Focus                                                              | Rationale                                                                                                                                                                                       |
-| --------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **39**    | Truth-matrix execution harness + verification-pipeline integration | **DONE.** Deterministic harness exercises detection → planning → execution-boundary → evidence → policy → result against 7 known-truth fixtures with simulated execution.                       |
-| **40**    | Real verify-sandbox lifecycle integration                          | **DONE.** Gated integration tests exercise CheckExecutor through SubprocessSandboxTransport with test harness fixture. Validates state machine, provenance tracking, and exit code propagation. |
-| **41**    | Evidence/provenance validation using real execution results        | Validate evidence model against actual sandbox output                                                                                                                                           |
-| **42**    | Policy + VerificationResult validation against the truth matrix    | Prove policy decisions and final results match known expected outcomes                                                                                                                          |
-| **43**    | Real TypeScript/JavaScript end-to-end verification                 | Run `tsc --noEmit`, `eslint`, `vitest` against real snapshot in sandbox, produce real evidence                                                                                                  |
-| **44**    | Real Rust/Soroban end-to-end verification                          | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`                                                                                                                  |
-| **45+**   | Durable queue + worker lifecycle + production hardening            | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                                                                                                                                 |
-| **Later** | GitHub feedback                                                    | PR comments, status checks                                                                                                                                                                      |
-| **Later** | AI-assisted reasoning                                              | Provider integration, prompt optimization                                                                                                                                                       |
-| **Later** | Additional ecosystem support                                       | Python, Go, Solidity, etc.                                                                                                                                                                      |
+| Batch     | Focus                                                              | Rationale                                                                                                                                                                                                                           |
+| --------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **39**    | Truth-matrix execution harness + verification-pipeline integration | **DONE.** Deterministic harness exercises detection → planning → execution-boundary → evidence → policy → result against 7 known-truth fixtures with simulated execution.                                                           |
+| **40**    | Real verify-sandbox lifecycle integration                          | **DONE.** Gated integration tests exercise CheckExecutor through SubprocessSandboxTransport with test harness fixture. Validates state machine, provenance tracking, and exit code propagation.                                     |
+| **41**    | Canonical sandbox contract integration + lifecycle validation      | **DONE.** Canonical contract validation, subprocess transport protocol tests, fail-closed process exit handling, URI-reference validation, security properties, enhanced test harness. Real verify-sandbox remains GATED. ADR-0009. |
+| **42**    | Policy + VerificationResult validation against the truth matrix    | Prove policy decisions and final results match known expected outcomes                                                                                                                                                              |
+| **43**    | Real TypeScript/JavaScript end-to-end verification                 | Run `tsc --noEmit`, `eslint`, `vitest` against real snapshot in sandbox, produce real evidence                                                                                                                                      |
+| **44**    | Real Rust/Soroban end-to-end verification                          | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`                                                                                                                                                      |
+| **45+**   | Durable queue + worker lifecycle + production hardening            | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                                                                                                                                                                     |
+| **Later** | GitHub feedback                                                    | PR comments, status checks                                                                                                                                                                                                          |
+| **Later** | AI-assisted reasoning                                              | Provider integration, prompt optimization                                                                                                                                                                                           |
+| **Later** | Additional ecosystem support                                       | Python, Go, Solidity, etc.                                                                                                                                                                                                          |
 
 ### Why this order
 
@@ -657,7 +657,117 @@ pnpm test -- tests/check-executor.integration.test.ts
 
 ---
 
-## 17. Overclaim warning
+## 17. Batch 41: Canonical sandbox contract integration & lifecycle validation
+
+Batch 41 validates the canonical sandbox request/result protocol and subprocess/lifecycle boundary using the controlled Node harness by default. Real external `verify-sandbox` execution is covered by gated tests and is NOT executed in the current environment.
+
+### What Batch 41 proves
+
+- **Canonical contract compliance**: VerifyAgent's request/result types conform to `verify-contracts/schemas/sandbox/sandbox-job-request.schema.json` and `sandbox-job-result.schema.json` (version 1.0.0)
+- **Command representation**: `SandboxCommand` objects are correctly serialized to JSON `ApprovedCommand` records matching the sandbox backend's expected format (executable, args, workingDirectory, environment)
+- **Opaque snapshot semantics**: `snapshot` is passed as an opaque identity string from `sourceState.value`, never a filesystem path
+- **Source identity binding**: `jobId`, `source`, and `snapshot` are bound to the same immutable verification source
+- **Resource limits**: Deterministic defaults (120s timeout, 512 MiB memory) conform to contract constraints and backend caps
+- **Network/artifact policy**: `none` is the only safe default; `restricted`/`allowlist` and `declared` are correctly not requested
+- **Result validation**: Real sandbox results are validated at the boundary against the canonical schema; malformed/mismatched/oversized responses are rejected
+- **Job identity verification**: Mismatched `jobId` between request and result is rejected
+- **Transport protocol purity**: One JSON request per line on stdin, one JSON result per line on stdout; diagnostics on stderr only; premature EOF, extra output, and malformed JSON are handled fail-closed
+- **Fail-closed process exit handling**: Non-zero process exit codes are rejected as transport failures before stdout is trusted; valid JSON emitted by a non-zero-exiting process is never accepted as a successful result
+- **Signal termination rejection**: Processes terminated by signal are rejected as transport failures
+- **URI-reference validation**: `logsRef` and `artifactRefs` are validated as canonical URI-references; malformed references are rejected
+- **Security properties**: `shell: false`, no host environment inheritance, no credential forwarding, bounded I/O, process cleanup
+- **Provenance propagation**: `executionSource: "real"` (subprocess) vs `"simulated"` (fake) correctly propagated through the pipeline
+- **Terminal status mapping**: All sandbox statuses (`completed`, `failed`, `timed_out`, `cancelled`, `error`) map to correct check statuses
+- **JSON-lines protocol behavior**: Controlled local subprocess harness integration proves protocol correctness
+
+### What Batch 41 did NOT prove
+
+- **Real production Verify Sandbox execution** — Tests use `tests/fixtures/sandbox-harness.mjs` (a controlled Node.js subprocess), NOT the real `verify-sandbox` process. Real Verify Sandbox execution remains GATED / NOT EXECUTED IN CURRENT ENVIRONMENT.
+- **Docker isolation** — No Docker orchestration or container isolation is exercised
+- **Real TypeScript/Rust toolchain execution inside Verify Sandbox** — Commands are simulated by the test harness, not executed by real toolchains
+- **Network/resource enforcement under Docker** — Not tested; requires real sandbox infrastructure
+- **Production sandbox deployment** — The test harness is a controlled local subprocess, not a production sandbox
+- **Hardened multi-tenant isolation** — Requires separate security review of the real sandbox
+- **Truth-matrix end-to-end validation** — This remains for Batches 42-44
+- **Production deployment security** — Durable queue, retry, monitoring are Batch 45+
+
+### Files changed
+
+| File                                                         | Change                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/sandbox-contract.integration.test.ts`                 | New: 50+ contract validation, transport, security, provenance, and integration tests                                                                                                                                                           |
+| `tests/fixtures/sandbox-harness.mjs`                         | Enhanced: 10+ new failure modes (wrong-version, job-mismatch, missing-fields, wrong-type, extra-output, error-result, timed_out-result, cancelled-result, resource-usage, exit-code-nonzero, with-artifacts, eof-no-output, error-exit-code-2) |
+| `docs/decisions/0009-verify-sandbox-contract-integration.md` | New: ADR documenting canonical contract ownership, request/result mapping, command representation, snapshot semantics, resource/network/artifact policy, transport responsibility, lifecycle ownership, provenance, and security properties    |
+| `docs/verification-readiness.md`                             | Updated: Batch 41 marked DONE with description                                                                                                                                                                                                 |
+
+### Canonical contract fields used
+
+**Request** (`sandbox-job-request.schema.json`):
+
+| Field                             | Value                        | Source                         |
+| --------------------------------- | ---------------------------- | ------------------------------ |
+| `schemaVersion`                   | `"1.0.0"`                    | Constant                       |
+| `jobId`                           | `execution.jobId`            | CheckExecution                 |
+| `source`                          | `{provider, reference}`      | RepositorySnapshot.source      |
+| `snapshot`                        | `sourceState.value`          | RepositorySnapshot.sourceState |
+| `commands`                        | `["{JSON ApprovedCommand}"]` | Trusted execution spec         |
+| `resourceLimits.timeoutMs`        | 120,000 (default)            | ExecutionLimits                |
+| `resourceLimits.memoryLimitBytes` | 536,870,912 (default)        | ExecutionLimits                |
+| `networkPolicy`                   | `"none"`                     | Hardcoded safe default         |
+| `artifactPolicy`                  | `"none"`                     | Hardcoded safe default         |
+
+**Result** (`sandbox-job-result.schema.json`):
+
+| Field           | Mapping                       |
+| --------------- | ----------------------------- |
+| `schemaVersion` | Validated as `"1.0.0"`        |
+| `jobId`         | Must match request.jobId      |
+| `status`        | Mapped to CheckStatus         |
+| `exitCode`      | Optional; 0=passed, ≠0=failed |
+| `durationMs`    | Pass-through                  |
+| `logsRef`       | Pass-through as rawOutputRef  |
+| `artifactRefs`  | Pass-through                  |
+| `resourceUsage` | Mapped to CheckResult.metrics |
+| `errors`        | Joined into summary           |
+
+### How to run
+
+```bash
+# Mode A: Test harness (spawns Node.js subprocess, no Docker required)
+pnpm test -- tests/sandbox-contract.integration.test.ts
+
+# Mode B: Real verify-sandbox (requires full environment)
+VERIFY_SANDBOX_INTEGRATION=1 \
+VERIFY_SANDBOX_PROCESS=/path/to/verify-sandbox-process \
+VERIFY_SANDBOX_SNAPSHOT_ROOT=/path/to/snapshots \
+VERIFY_SANDBOX_DOCKER_EXECUTABLE=/usr/bin/docker \
+VERIFY_SANDBOX_DOCKER_HOST=unix:///var/run/docker.sock \
+VERIFY_SANDBOX_SYSTEM_ROOT=/system \
+VERIFY_SANDBOX_TEMP_ROOT=/tmp \
+pnpm test -- tests/sandbox-contract.integration.test.ts
+```
+
+### Test coverage
+
+- 50+ tests across 13 describe blocks
+- Contract validation: request and result schema compliance
+- Job identity: mismatched jobId rejection
+- Transport protocol: JSON-lines, malformed, EOF, extra output, timeout, cancellation, process failure
+- Security: shell:false, env isolation, command format, snapshot opacity, policy defaults, resource bounds
+- Result handling: all terminal status mappings, resource usage, errors, artifacts
+- Command representation: spec→command→JSON argv, trusted spec registry
+- Snapshot semantics: opaque identity, no host paths
+- Source identity: immutable reference binding
+- Resource limits: defaults, bounds, pass-through
+- Provenance: real vs simulated, producer propagation
+- Schema edge cases: null, wrong types, missing fields, boundary values
+- Mode A integration: full pipeline through test harness
+- Mode B integration: gated against real verify-sandbox
+- Harness scenarios: 10+ enhanced failure modes
+
+---
+
+## 18. Overclaim warning
 
 > Passing VerifyAgent's unit/integration tests does not by itself prove that VerifyAgent correctly verifies arbitrary repositories.
 

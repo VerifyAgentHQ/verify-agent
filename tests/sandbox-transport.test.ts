@@ -155,6 +155,15 @@ describe("sandbox transport boundary", () => {
     await expect(pending).rejects.toThrow(/cancelled/);
   });
 
+  it("rejects valid JSON result when sandbox process exits non-zero", async () => {
+    await expect(
+      processTransport().execute({
+        ...request,
+        snapshot: "valid-json-nonzero-exit",
+      }),
+    ).rejects.toThrow(SandboxTransportError);
+  });
+
   it("does not expose host environment or arbitrary execution configuration", () => {
     expect(internalRequest.commands[0]).toMatchObject({
       executable: "cargo",

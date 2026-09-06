@@ -79,6 +79,16 @@ function stringArray(value: unknown, name: string, maxItem: number): string[] {
   return value.map((entry) => stringField(entry, name, maxItem));
 }
 
+const URI_REFERENCE_CHARS = /^[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$/;
+const MALFORMED_PERCENT = /%(?![0-9A-Fa-f]{2})/;
+
+function isValidUriReference(value: string): boolean {
+  if (value.length === 0 || value.length > 2048) return false;
+  if (!URI_REFERENCE_CHARS.test(value)) return false;
+  if (MALFORMED_PERCENT.test(value)) return false;
+  return true;
+}
+
 export function validateSandboxJobRequest(
   value: unknown,
 ): PublicSandboxJobRequest {
@@ -172,12 +182,17 @@ export function validateSandboxJobResult(
     throw new SandboxProtocolError("invalid sandbox result status");
   const durationMs = integerField(object.durationMs, "durationMs", 0);
   const logsRef =
-    typeof object.logsRef === "string" && object.logsRef.length <= 2048
+    typeof object.logsRef === "string" && isValidUriReference(object.logsRef)
       ? object.logsRef
       : (() => {
           throw new SandboxProtocolError("invalid logsRef");
         })();
-  const artifactRefs = stringArray(object.artifactRefs, "artifactRef", 2048);
+  const rawArtifactRefs = stringArray(object.artifactRefs, "artifactRef", 2048);
+  for (const ref of rawArtifactRefs) {
+    if (!isValidUriReference(ref))
+      throw new SandboxProtocolError("invalid artifactRef URI-reference");
+  }
+  const artifactRefs = rawArtifactRefs;
   if (artifactRefs.length > 100)
     throw new SandboxProtocolError("too many artifact references");
   const usage = record(object.resourceUsage);
@@ -336,7 +351,9 @@ export class SubprocessSandboxTransport implements SandboxTransport {
       ]);
       if (cancelled)
         throw new SandboxTransportError("sandbox request cancelled");
-      if (code !== 0 && raw.trim().length === 0)
+      if (code === null)
+        throw new SandboxTransportError("sandbox process terminated by signal");
+      if (code !== 0)
         throw new SandboxTransportError(
           `sandbox process exited with code ${String(code)}`,
         );
