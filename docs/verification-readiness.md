@@ -522,18 +522,18 @@ real TypeScript E2E
 real Rust/Soroban E2E
 ```
 
-| Batch     | Focus                                                              | Rationale                                                                                                                                                                                                                           |
-| --------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **39**    | Truth-matrix execution harness + verification-pipeline integration | **DONE.** Deterministic harness exercises detection → planning → execution-boundary → evidence → policy → result against 7 known-truth fixtures with simulated execution.                                                           |
-| **40**    | Real verify-sandbox lifecycle integration                          | **DONE.** Gated integration tests exercise CheckExecutor through SubprocessSandboxTransport with test harness fixture. Validates state machine, provenance tracking, and exit code propagation.                                     |
-| **41**    | Canonical sandbox contract integration + lifecycle validation      | **DONE.** Canonical contract validation, subprocess transport protocol tests, fail-closed process exit handling, URI-reference validation, security properties, enhanced test harness. Real verify-sandbox remains GATED. ADR-0009. |
-| **42**    | Policy + VerificationResult validation against the truth matrix    | Prove policy decisions and final results match known expected outcomes                                                                                                                                                              |
-| **43**    | Real TypeScript/JavaScript end-to-end verification                 | Run `tsc --noEmit`, `eslint`, `vitest` against real snapshot in sandbox, produce real evidence                                                                                                                                      |
-| **44**    | Real Rust/Soroban end-to-end verification                          | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`                                                                                                                                                      |
-| **45+**   | Durable queue + worker lifecycle + production hardening            | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                                                                                                                                                                     |
-| **Later** | GitHub feedback                                                    | PR comments, status checks                                                                                                                                                                                                          |
-| **Later** | AI-assisted reasoning                                              | Provider integration, prompt optimization                                                                                                                                                                                           |
-| **Later** | Additional ecosystem support                                       | Python, Go, Solidity, etc.                                                                                                                                                                                                          |
+| Batch     | Focus                                                              | Rationale                                                                                                                                                                                                                                |
+| --------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **39**    | Truth-matrix execution harness + verification-pipeline integration | **DONE.** Deterministic harness exercises detection → planning → execution-boundary → evidence → policy → result against 7 known-truth fixtures with simulated execution.                                                                |
+| **40**    | Real verify-sandbox lifecycle integration                          | **DONE.** Gated integration tests exercise CheckExecutor through SubprocessSandboxTransport with test harness fixture. Validates state machine, provenance tracking, and exit code propagation.                                          |
+| **41**    | Canonical sandbox contract integration + lifecycle validation      | **DONE.** Canonical contract validation, subprocess transport protocol tests, fail-closed process exit handling, URI-reference validation, security properties, enhanced test harness. Real verify-sandbox remains GATED. ADR-0009.      |
+| **42**    | Policy + VerificationResult validation against the truth matrix    | **DONE.** Proves policy decisions and final results match known expected outcomes. 53 tests validate policy truth, VerificationResult completeness, evidence integrity, edge cases, and full pipeline integration across all 7 fixtures. |
+| **43**    | Real TypeScript/JavaScript end-to-end verification                 | Run `tsc --noEmit`, `eslint`, `vitest` against real snapshot in sandbox, produce real evidence                                                                                                                                           |
+| **44**    | Real Rust/Soroban end-to-end verification                          | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`                                                                                                                                                           |
+| **45+**   | Durable queue + worker lifecycle + production hardening            | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                                                                                                                                                                          |
+| **Later** | GitHub feedback                                                    | PR comments, status checks                                                                                                                                                                                                               |
+| **Later** | AI-assisted reasoning                                              | Provider integration, prompt optimization                                                                                                                                                                                                |
+| **Later** | Additional ecosystem support                                       | Python, Go, Solidity, etc.                                                                                                                                                                                                               |
 
 ### Why this order
 
@@ -767,7 +767,63 @@ pnpm test -- tests/sandbox-contract.integration.test.ts
 
 ---
 
-## 18. Overclaim warning
+## 18. Batch 42: Policy + VerificationResult validation against the truth matrix
+
+Batch 42 validates the policy and VerificationResult layers against the 7 known-truth fixtures, proving that evidence interpretation, aggregation, deterministic policy decisions, and VerificationResult assembly produce the correct outcomes for every scenario.
+
+### What Batch 42 proves
+
+- **Policy truth**: Every fixture scenario triggers the correct policy rule(s) and produces the expected policy outcome
+- **Evidence traceability**: All evidence references link back to executed check results; findings reference their source evidence
+- **VerificationResult completeness**: Result fields (status, coverage, evidenceReferences, findingReferences, policyDecision, summary, contentHash) are preserved correctly
+- **Failure propagation**: Failing checks propagate through findings → policy block → VerificationResult blocked status
+- **Healthy fixture safety**: Healthy fixtures with simulated execution produce `needs_changes`, never `pass`
+- **Policy determinism**: Identical inputs produce identical policy decisions and content hashes
+- **Policy rule priority**: `required-check-failure` takes precedence over `non-real-required-execution` when both apply
+- **Coverage categories**: Coverage categories (verified, partial, simulated, fixture, unsupported, notApplicable) are mutually exclusive per capability
+- **Edge cases**: Incomplete evidence (applicable checks with no results) produces partial coverage; empty plans produce pass; error status overrides policy block; multiple failures aggregate correctly
+
+### What Batch 42 does NOT prove
+
+- **Real sandbox execution** — Tests use `createDeterministicTestExecutor()` (simulated), not real command execution
+- **Arbitrary repository correctness** — Fixtures are controlled known-truth snapshots
+- **Policy customization** — Tests use the default policy; custom policies are not validated
+
+### Test categories (53 tests)
+
+| Category                            | Tests | Focus                                                                                   |
+| ----------------------------------- | ----- | --------------------------------------------------------------------------------------- |
+| Policy truth validation             | 10    | Policy rule triggering, outcome correctness, determinism, priority, edge rules          |
+| VerificationResult truth validation | 7     | Status correctness, field preservation, coverage, summary, determinism                  |
+| Evidence integrity                  | 4     | Content hashes, source references, finding links, cross-run determinism                 |
+| Edge cases                          | 10    | Empty results, incomplete evidence, error override, multiple failures, contradictions   |
+| Full pipeline integration           | 21    | Complete traceability (7), determinism (7), coverage matching (7) across all 7 fixtures |
+
+### Policy truth requirements validated
+
+| Requirement                                                                | Fixture(s)                       | Assertion                                                                   |
+| -------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------- |
+| CASE 1: Healthy fixture with non-real execution stays needs_changes        | typescript-healthy, rust-healthy | `outcome === "needs_changes"`, rule `non-real-required-execution` triggered |
+| CASE 2: Failing typecheck propagates through evidence to policy to result  | typescript-failing-typecheck     | findings > 0, high severity, policy block, result blocked                   |
+| CASE 3: Failing test propagates through evidence to policy to result       | typescript-failing-test          | findings > 0, policy block, result blocked                                  |
+| CASE 4: Failing build propagates through evidence to policy to result      | typescript-failing-build         | findings > 0, policy block, result blocked                                  |
+| CASE 5: Rust failing build propagates through evidence to policy to result | rust-failing-build               | findings > 0, policy block, result blocked                                  |
+
+### Files added
+
+| File                                              | Change                                                                                                             |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `tests/batch-42-policy-result-validation.test.ts` | New: 53 tests covering policy truth, VerificationResult, evidence integrity, edge cases, full pipeline integration |
+
+### How to run
+
+```bash
+pnpm test -- tests/batch-42-policy-result-validation.test.ts
+```
+
+---
+
+## 19. Overclaim warning
 
 > Passing VerifyAgent's unit/integration tests does not by itself prove that VerifyAgent correctly verifies arbitrary repositories.
 
