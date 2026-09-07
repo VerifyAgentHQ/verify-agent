@@ -50,15 +50,15 @@ CheckExecutor
 
 Key mapping decisions:
 
-| VerifyAgent field | Canonical field | Mapping |
-|---|---|---|
-| `execution.jobId` | `jobId` | Direct pass-through (branded VerificationJobId) |
-| `snapshot.sourceState.value` | `snapshot` | Opaque identity string — never a filesystem path |
-| `snapshot.source` | `source` | `{provider, reference}` pass-through |
-| Trusted execution spec | `commands[0]` | JSON-serialized `ApprovedCommand` record |
-| `DEFAULT_EXECUTION_LIMITS` | `resourceLimits` | Deterministic defaults: 120s timeout, 512 MiB memory |
-| Hardcoded policy | `networkPolicy` | `"none"` — only safe default for Docker backend |
-| Hardcoded policy | `artifactPolicy` | `"none"` — declared artifacts not supported in public contract |
+| VerifyAgent field            | Canonical field  | Mapping                                                        |
+| ---------------------------- | ---------------- | -------------------------------------------------------------- |
+| `execution.jobId`            | `jobId`          | Direct pass-through (branded VerificationJobId)                |
+| `snapshot.sourceState.value` | `snapshot`       | Opaque identity string — never a filesystem path               |
+| `snapshot.source`            | `source`         | `{provider, reference}` pass-through                           |
+| Trusted execution spec       | `commands[0]`    | JSON-serialized `ApprovedCommand` record                       |
+| `DEFAULT_EXECUTION_LIMITS`   | `resourceLimits` | Deterministic defaults: 120s timeout, 512 MiB memory           |
+| Hardcoded policy             | `networkPolicy`  | `"none"` — only safe default for Docker backend                |
+| Hardcoded policy             | `artifactPolicy` | `"none"` — declared artifacts not supported in public contract |
 
 ### 3. Command representation
 
@@ -94,9 +94,9 @@ VerifyAgent must NOT send:
 
 ### 5. Resource limits
 
-| Parameter | Default | Contract max | Backend max |
-|---|---|---|---|
-| `timeoutMs` | 120,000 | none (integer >= 1) | 3,600,000 (1 hour) |
+| Parameter          | Default               | Contract max              | Backend max           |
+| ------------------ | --------------------- | ------------------------- | --------------------- |
+| `timeoutMs`        | 120,000               | none (integer >= 1)       | 3,600,000 (1 hour)    |
 | `memoryLimitBytes` | 536,870,912 (512 MiB) | 1,099,511,627,776 (1 TiB) | 4,294,967,296 (4 GiB) |
 
 VerifyAgent expresses requested limits; the sandbox enforces caps.
@@ -124,14 +124,14 @@ verify-sandbox process
 
 Terminal status mapping:
 
-| Sandbox status | Check status |
-|---|---|
-| `completed` + exitCode=0 | `passed` |
-| `completed` + exitCode≠0 | `failed` |
-| `failed` | `error` |
-| `timed_out` | `timed_out` |
-| `cancelled` | `cancelled` |
-| `error` | `error` |
+| Sandbox status           | Check status |
+| ------------------------ | ------------ |
+| `completed` + exitCode=0 | `passed`     |
+| `completed` + exitCode≠0 | `failed`     |
+| `failed`                 | `error`      |
+| `timed_out`              | `timed_out`  |
+| `cancelled`              | `cancelled`  |
+| `error`                  | `error`      |
 
 ### 9. Transport responsibility
 
@@ -166,11 +166,11 @@ This lifecycle belongs entirely to `verify-sandbox`. VerifyAgent only:
 
 ## Provenance
 
-| Execution path | `executionSource` |
-|---|---|
-| `SubprocessSandboxTransport` | `"real"` |
-| `FakeSandboxTransport` | `"simulated"` |
-| `createDeterministicTestExecutor()` | `"simulated"` |
+| Execution path                      | `executionSource` |
+| ----------------------------------- | ----------------- |
+| `SubprocessSandboxTransport`        | `"real"`          |
+| `FakeSandboxTransport`              | `"simulated"`     |
+| `createDeterministicTestExecutor()` | `"simulated"`     |
 
 The `executionSource` is immutable per transport instance and propagated through:
 
@@ -211,21 +211,21 @@ transport.executionSource → executor.executionSource → execution.executionSo
 
 Batch 41 adds comprehensive test coverage in `tests/sandbox-contract.integration.test.ts`:
 
-| Category | Tests |
-|---|---|
-| Contract validation | 25+ request/result validation cases |
-| Job identity | Mismatched jobId rejection |
-| Transport protocol | JSON-lines, malformed, EOF, extra output, timeout, cancellation |
-| Security | shell:false, env isolation, command format, snapshot opacity |
-| Result handling | All terminal status mappings, resource usage, errors, artifacts |
-| Command representation | Spec→command→JSON argv mapping, trusted spec rejection |
-| Snapshot semantics | Opaque identity verification |
-| Resource limits | Default values, bounds, pass-through |
-| Provenance | Real vs simulated, producer propagation |
-| Schema edge cases | Null, wrong types, missing fields, boundary values |
-| Mode A (harness) | Full pipeline through test fixture |
-| Mode B (real) | Gated against real verify-sandbox |
-| Harness scenarios | 10+ enhanced failure modes |
+| Category               | Tests                                                           |
+| ---------------------- | --------------------------------------------------------------- |
+| Contract validation    | 25+ request/result validation cases                             |
+| Job identity           | Mismatched jobId rejection                                      |
+| Transport protocol     | JSON-lines, malformed, EOF, extra output, timeout, cancellation |
+| Security               | shell:false, env isolation, command format, snapshot opacity    |
+| Result handling        | All terminal status mappings, resource usage, errors, artifacts |
+| Command representation | Spec→command→JSON argv mapping, trusted spec rejection          |
+| Snapshot semantics     | Opaque identity verification                                    |
+| Resource limits        | Default values, bounds, pass-through                            |
+| Provenance             | Real vs simulated, producer propagation                         |
+| Schema edge cases      | Null, wrong types, missing fields, boundary values              |
+| Mode A (harness)       | Full pipeline through test fixture                              |
+| Mode B (real)          | Gated against real verify-sandbox                               |
+| Harness scenarios      | 10+ enhanced failure modes                                      |
 
 ---
 
