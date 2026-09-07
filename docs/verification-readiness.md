@@ -246,7 +246,58 @@ Each fixture is a known-truth repository snapshot encoding a deterministic expec
 3. Executed in the sandbox with `networkPolicy: none`
 4. Produce deterministic, repeatable results
 
-> **Current status**: The source fixtures are deterministic inputs with known expected outcomes. TypeScript fixtures depend on packages (TypeScript, Vitest, etc.) without committed lockfiles or approved dependency artifacts, so they currently require dependency provisioning before execution. Offline/reproducible execution will be established later as part of real sandbox/execution integration. The truth matrix is currently a specification/fixture set, not yet a completed end-to-end execution harness.
+### Dependency strategy (Batch 43D — image-provisioned + wrapper scripts)
+
+TypeScript fixtures require `typescript` and `vitest` packages to execute check commands (`pnpm exec tsc`, `pnpm exec vitest run`). The sandbox image provisions these globally at image-build time. The snapshot includes only minimal Node.js wrapper scripts from `sandbox-wrappers/` (tracked in git) that `pnpm exec` can discover after installation to `node_modules/.bin/`.
+
+**Strategy: Image-provisioned tools + repository-controlled wrapper scripts**
+
+The sandbox Docker image installs typescript and vitest globally. Each TypeScript fixture contains a `sandbox-wrappers/` directory with tiny (~150 byte) Node.js wrapper scripts tracked in git. The snapshot provisioner copies these to `node_modules/.bin/` so `pnpm exec` can discover them.
+
+This strategy is:
+
+- **Repository-controlled**: wrapper scripts in `sandbox-wrappers/` are tracked in git
+- **Image-provisioned**: typescript/vitest installed at Docker build time
+- **Explicit**: allowlist enumerates exactly what the snapshot contains
+- **Bounded**: wrapper scripts are ~150 bytes each, not full node_modules
+- **Offline**: no network required at runtime
+- **No host installation**: wrapper scripts come from git, not the host
+
+**What the sandbox image provides:**
+
+- Node.js 24.19.0, pnpm 11.21.0 (core runtime)
+- typescript@5.8.3 (global) — for `tsc --noEmit` and `tsc --build`
+- vitest@2.1.9 (global) — for `vitest run`
+- `NODE_PATH=/usr/local/lib/node_modules` — enables vitest import resolution
+
+**What the snapshot contains:**
+
+- Source files (`src/index.ts`, `src/index.test.ts`)
+- Config files (`package.json`, `tsconfig.json`, `vitest.config.ts`)
+- Wrapper scripts (`node_modules/.bin/tsc`, `node_modules/.bin/vitest`) — installed from `sandbox-wrappers/`
+
+**What is excluded from the snapshot:**
+
+- `sandbox-wrappers/` (removed after installation to `node_modules/.bin/`)
+- `node_modules/typescript/`, `node_modules/vitest/` (image-provisioned)
+- `dist` (build output)
+- `tsconfig.tsbuildinfo` (TypeScript build cache)
+- `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` (lock files not needed at runtime)
+- `.turbo`, `.cache`, `.vitest`, `coverage`, `.nyc_output` (caches and generated state)
+
+**Where dependencies come from:**
+
+- typescript and vitest are installed globally in the sandbox Docker image
+- Wrapper scripts in `sandbox-wrappers/` are tracked in git (repository-controlled)
+- They are copied to `node_modules/.bin/` by the snapshot provisioner
+- They are NOT copied from the host machine's `node_modules`
+- They are NOT installed at runtime by the snapshot provisioner
+
+**Is network required:** No. The sandbox has no network access. Dependencies are fully contained in the image and wrapper scripts.
+
+**Is host installation forbidden:** Yes. The real-sandbox test path never runs `npm install`, `pnpm install`, or equivalent on the host. Wrapper scripts come from git; tools come from the Docker image.
+
+> **Current status (Batch 43D)**: The sandbox image provisions typescript and vitest globally. Repository-controlled wrapper scripts in `sandbox-wrappers/` are installed to `node_modules/.bin/` by the snapshot provisioner. A clean git checkout provides the wrapper scripts; the sandbox image provides the tools. Offline, reproducible execution is established without full node_modules in the snapshot.
 
 ### How fixtures are used
 
@@ -522,18 +573,22 @@ real TypeScript E2E
 real Rust/Soroban E2E
 ```
 
-| Batch     | Focus                                                              | Rationale                                                                                                                                                                                                                                |
-| --------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **39**    | Truth-matrix execution harness + verification-pipeline integration | **DONE.** Deterministic harness exercises detection → planning → execution-boundary → evidence → policy → result against 7 known-truth fixtures with simulated execution.                                                                |
-| **40**    | Real verify-sandbox lifecycle integration                          | **DONE.** Gated integration tests exercise CheckExecutor through SubprocessSandboxTransport with test harness fixture. Validates state machine, provenance tracking, and exit code propagation.                                          |
-| **41**    | Canonical sandbox contract integration + lifecycle validation      | **DONE.** Canonical contract validation, subprocess transport protocol tests, fail-closed process exit handling, URI-reference validation, security properties, enhanced test harness. Real verify-sandbox remains GATED. ADR-0009.      |
-| **42**    | Policy + VerificationResult validation against the truth matrix    | **DONE.** Proves policy decisions and final results match known expected outcomes. 53 tests validate policy truth, VerificationResult completeness, evidence integrity, edge cases, and full pipeline integration across all 7 fixtures. |
-| **43**    | Real TypeScript/JavaScript end-to-end verification                 | Run `tsc --noEmit`, `eslint`, `vitest` against real snapshot in sandbox, produce real evidence                                                                                                                                           |
-| **44**    | Real Rust/Soroban end-to-end verification                          | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`                                                                                                                                                           |
-| **45+**   | Durable queue + worker lifecycle + production hardening            | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                                                                                                                                                                          |
-| **Later** | GitHub feedback                                                    | PR comments, status checks                                                                                                                                                                                                               |
-| **Later** | AI-assisted reasoning                                              | Provider integration, prompt optimization                                                                                                                                                                                                |
-| **Later** | Additional ecosystem support                                       | Python, Go, Solidity, etc.                                                                                                                                                                                                               |
+| Batch     | Focus                                                                          | Rationale                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **39**    | Truth-matrix execution harness + verification-pipeline integration             | **DONE.** Deterministic harness exercises detection → planning → execution-boundary → evidence → policy → result against 7 known-truth fixtures with simulated execution.                                                                                                                                                                                                                                                                                                                            |
+| **40**    | Real verify-sandbox lifecycle integration                                      | **DONE.** Gated integration tests exercise CheckExecutor through SubprocessSandboxTransport with test harness fixture. Validates state machine, provenance tracking, and exit code propagation.                                                                                                                                                                                                                                                                                                      |
+| **41**    | Canonical sandbox contract integration + lifecycle validation                  | **DONE.** Canonical contract validation, subprocess transport protocol tests, fail-closed process exit handling, URI-reference validation, security properties, enhanced test harness. Real verify-sandbox remains GATED. ADR-0009.                                                                                                                                                                                                                                                                  |
+| **42**    | Policy + VerificationResult validation against the truth matrix                | **DONE.** Proves policy decisions and final results match known expected outcomes. 53 tests validate policy truth, VerificationResult completeness, evidence integrity, edge cases, and full pipeline integration across all 7 fixtures.                                                                                                                                                                                                                                                             |
+| **43**    | TypeScript/JavaScript end-to-end verification (host-subprocess + real sandbox) | **DONE.** Two test suites: (1) host-subprocess E2E (10 tests, `VERIFY_REAL_SANDBOX=1`) proves real toolchain execution on host via local harness; (2) real sandbox E2E (16 tests, `VERIFY_SANDBOX_PROCESS` + `VERIFY_SANDBOX_IDENTITY`) proves Docker-isolated execution via external verify-sandbox process with wrapper-script-based snapshot provisioning. Fixes harness status mapping, Windows CMD resolution, fixture vitest configs, deterministic build-only failure via project references. |
+| **43A**   | Batch 43 corrective: honest naming + real sandbox separation                   | **DONE.** Corrected host-subprocess tests to honestly label execution boundary. Created separate `batch-43-real-sandbox.test.ts` requiring actual external sandbox. Failing-build fixture redesigned with `lib/` sub-project for deterministic build-only failure (`tsc --noEmit` passes, `tsc --build` fails). Harness labeled as host-subprocess only.                                                                                                                                             |
+| **43B**   | Batch 43 corrective: clean provisioning + identity gate + docs                 | **DONE.** Allowlist-based snapshot provisioning excludes dist/caches. `VERIFY_SANDBOX_IDENTITY` operator-controlled gate replaces filename-based guessing. Documentation corrected to accurately describe host snapshot provisioning vs sandbox materialization. Real sandbox tests expanded to 16 including snapshot cleanliness/content validation and executable permission verification.                                                                                                         |
+| **43C**   | Batch 43 corrective: reproducible snapshot dependency strategy (SUPERSEDED)    | **SUPERSEDED BY 43D.** Investigated snapshot-included `node_modules` as deterministic dependency artifacts. The approach was rejected because fixture `node_modules` are `.gitignored` and therefore not reproducible from a clean checkout. Batch 43D replaced this with image-provisioned TypeScript/Vitest + repository-controlled wrapper scripts.                                                                                                                                               |
+| **43D**   | Batch 43 corrective: image-provisioned tools + wrapper scripts                 | **DONE.** Replaced full node_modules snapshot with minimal wrapper scripts. Sandbox Docker image now installs typescript@5.8.3 and vitest@2.1.9 globally + sets NODE_PATH. Snapshot provisioner creates ~150-byte Node.js wrapper scripts in `node_modules/.bin/` that delegate to global tools. Wrapper scripts tracked in git (repository-controlled). Updated docs with accurate dependency strategy.                                                                                             |
+| **44**    | Real Rust/Soroban end-to-end verification                                      | Extend to Rust ecosystem with real `cargo check`, `cargo test`, `cargo clippy`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **45+**   | Durable queue + worker lifecycle + production hardening                        | Redis/SQS/BullMQ, retry, backoff, graceful shutdown, monitoring                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Later** | GitHub feedback                                                                | PR comments, status checks                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **Later** | AI-assisted reasoning                                                          | Provider integration, prompt optimization                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Later** | Additional ecosystem support                                                   | Python, Go, Solidity, etc.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ### Why this order
 
@@ -823,7 +878,161 @@ pnpm test -- tests/batch-42-policy-result-validation.test.ts
 
 ---
 
-## 19. Overclaim warning
+## 19. Batch 43: TypeScript/JavaScript end-to-end verification (host-subprocess + real sandbox)
+
+Batch 43 proves a genuine end-to-end verification path through the actual `SubprocessSandboxTransport`, executing real TypeScript/JavaScript toolchain commands against known-truth fixtures and producing real evidence, policy decisions, and `VerificationResult` objects.
+
+### Two execution levels
+
+Batch 43 has two distinct test suites that prove different levels of execution:
+
+| Test suite                        | Gate                                             | What it proves                                                                             | What it does NOT prove                                  |
+| --------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| `batch-43-typescript-e2e.test.ts` | `VERIFY_REAL_SANDBOX=1`                          | Real toolchain execution on the host machine via a local Node.js subprocess                | Sandbox isolation, Docker, network enforcement          |
+| `batch-43-real-sandbox.test.ts`   | `VERIFY_SANDBOX_PROCESS` + all required env vars | Real sandbox execution inside a Docker container via the external `verify-sandbox` process | Arbitrary repository correctness, production deployment |
+
+### Host-subprocess E2E tests (10 tests)
+
+What the host-subprocess tests prove:
+
+- **Genuine E2E path**: Truth fixture → source/project detection → check planning → real TypeScript/JavaScript execution → sandbox transport boundary → evidence → policy → `VerificationResult` with `executionSource: "real"`
+- **Real toolchain execution**: `pnpm exec tsc --noEmit`, `pnpm exec vitest run`, `pnpm exec tsc --build` execute against real TypeScript fixture code through the actual `SubprocessSandboxTransport`
+- **Transport correctness**: `SubprocessSandboxTransport` spawns the real execution harness, communicates via JSON-lines stdin/stdout, correctly captures exit codes, and validates results against the canonical sandbox contract
+- **Harness correctness**: The host-subprocess execution harness (`sandbox-real-execution-harness.mjs`) correctly reads `SandboxJobRequest` from stdin, executes commands with `shell: false` and explicit environment, captures stdout/stderr/exit code, and writes valid `SandboxJobResult` to stdout
+- **Status mapping**: `sandboxResult.status === "completed"` with `exitCode === 0` maps to `CheckStatus: "passed"`; non-zero exit codes map to `CheckStatus: "failed"`; `sandboxResult.status === "error"` maps to `CheckStatus: "error"`
+- **Evidence provenance**: All evidence has `executionSource: "real"`, never `"simulated"` or `"fixture"`
+- **Evidence traceability**: Evidence preserves `checkId`, `exitCode`, `durationMs`, `contentHash`, `sourceReferences`, and `findingReferences`
+- **Policy correctness with real execution**: Healthy fixtures with real execution produce `allow` policy outcome (not `needs_changes`); failing fixtures produce `block` with `required-check-failure` rule
+- **VerificationResult completeness**: Result preserves `status`, `coverage.verified`, `coverage.partial`, `evidenceReferences`, `findingReferences`, and `policyDecision`
+- **Semantic determinism**: Repeated real runs produce semantically identical outcomes (status, policy decision, evidence count, findings count) — content hashes may differ due to non-deterministic `durationMs`
+
+What the host-subprocess tests do NOT prove:
+
+- **Sandbox isolation** — The harness is a local Node.js subprocess, not a Docker-containerized sandbox
+- **Network/resource enforcement under Docker** — Not tested; requires real sandbox infrastructure
+- **Arbitrary repository correctness** — Fixtures are controlled known-truth snapshots
+- **Production deployment** — No durable queue, worker loop, or GitHub feedback
+- **Rust/Soroban execution** — Batch 44 covers Rust ecosystem
+
+### Real sandbox E2E tests (16 tests)
+
+What the real sandbox tests prove:
+
+- **Real sandbox execution**: Commands executed by the external `verify-sandbox` process inside a Docker container
+- **Clean snapshot provisioning**: The test host provisions the configured snapshot store with an explicit allowlist of fixture source/config files and tracked `sandbox-wrappers/` scripts
+- **Opaque snapshot identity**: The `snapshot` field is an opaque branded identity string (`batch43-real-sandbox-...`), not a filesystem path; the sandbox process performs the subsequent lookup/materialization into the isolated workspace
+- **No host-side dependency installation**: The provisioning helper copies only approved files; no npm/pnpm install is run on the host
+- **Repository-controlled wrapper scripts**: The snapshot includes Git-tracked `sandbox-wrappers/` scripts (Node.js shebangs that delegate to globally installed tools); during provisioning these are materialized as executable `node_modules/.bin/tsc` and `node_modules/.bin/vitest`
+- **Snapshot reproducibility**: A clean snapshot contains all prerequisites for check execution (source files, config files, executable wrapper scripts) without host-generated state
+- **Executable permissions**: Materialized wrapper scripts receive mode `0o755` for `pnpm exec` resolution on the Linux sandbox
+- **Sandbox identity verification**: `VERIFY_SANDBOX_IDENTITY` must match the expected value (`verify-sandbox-process-0.1.0`); this is an operator-controlled gate, not a filename check
+- **Deterministic build failure**: `tsc --noEmit` passes (exit 0), `tsc --build` fails (exit 2) — deterministic, no machine-specific state
+- **Snapshot cleanliness**: Provisioned snapshots contain no node_modules, dist, tsbuildinfo, caches, or generated files
+
+What the real sandbox tests do NOT prove:
+
+- **Sandbox isolation** — Isolation is provided by the external `verify-sandbox` process, not by this test suite
+- **Arbitrary repository correctness** — Fixtures are controlled known-truth snapshots
+- **Production deployment** — No durable queue, worker loop, or GitHub feedback
+- **Rust/Soroban execution** — Batch 44 covers Rust ecosystem
+
+### Bugs fixed during Batch 43
+
+| Issue                                                         | Root cause                                                                                              | Fix                                                                                                                                                                        |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All checks returned `error` status                            | Harness returned `status: "failed"` for command failures; `checkStatus()` mapped `"failed"` → `"error"` | Harness now always returns `status: "completed"` (matching simulated harness contract)                                                                                     |
+| Windows `.CMD` files can't be spawned with `shell: false`     | `pnpm` is a `.CMD` wrapper; `spawn("pnpm", ..., {shell:false})` throws `EINVAL`                         | Harness wraps non-existing executables with `cmd.exe /s /c <name>`                                                                                                         |
+| `tsc --noEmit` failed for healthy fixture                     | Fixture had no vitest config; vitest walked up to root `vitest.config.mjs` with wrong `include` pattern | Added `vitest.config.ts` with correct `include: ["src/**/*.test.ts"]` to each TypeScript fixture with tests                                                                |
+| `tsc --noEmit` failed for failing-build fixture               | Fixture code had `const result: string = add(1, 2)` (type error), making typecheck also fail            | Fixed fixture code to be type-safe; used project references to cause build-only failure deterministically                                                                  |
+| Content hash non-determinism in determinism test              | `durationMs` varies between real runs and is included in content hash                                   | Removed `contentHash` comparison; semantic equivalence is captured by status/outcome/structure assertions                                                                  |
+| Host-subprocess tests labeled as "real sandbox"               | Tests were mislabeled, creating confusion about execution boundary                                      | Renamed to "host-subprocess" and created separate `batch-43-real-sandbox.test.ts` for actual sandbox tests                                                                 |
+| Snapshot provisioning copied all files including node_modules | `cp -r` copied everything including generated/host state                                                | Batch 43B: Allowlist-based provisioning copies only approved source/config files                                                                                           |
+| No positive sandbox identity verification                     | Gate only checked env var presence and filename patterns                                                | Batch 43B: `VERIFY_SANDBOX_IDENTITY` must match expected value; operator-controlled gate                                                                                   |
+| Real-sandbox snapshots excluded dependency artifacts          | Clean snapshot excluded node_modules, but sandbox has no network and doesn't install packages           | Batch 43D: Sandbox Docker image provisions typescript/vitest globally; fixture `sandbox-wrappers/` provide executable wrapper scripts materialized to `node_modules/.bin/` |
+
+### Files changed
+
+| File                                                               | Change                                                                                                                                                                                  |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/batch-43-typescript-e2e.test.ts`                            | New: 10 host-subprocess E2E tests gated behind `VERIFY_REAL_SANDBOX=1`                                                                                                                  |
+| `tests/batch-43-real-sandbox.test.ts`                              | Updated: 16 real sandbox E2E tests with wrapper-script-based allowlist provisioning, `VERIFY_SANDBOX_IDENTITY` gate, snapshot reproducibility tests, executable permission verification |
+| `tests/fixtures/sandbox-real-execution-harness.mjs`                | Fixed: `status` mapping, Windows `.CMD` resolution, PATH passthrough, error+close double-write prevention; labeled as host-subprocess harness                                           |
+| `fixtures/truth-matrix/typescript/healthy/vitest.config.ts`        | New: Local vitest config for fixture test discovery                                                                                                                                     |
+| `fixtures/truth-matrix/typescript/failing-test/vitest.config.ts`   | New: Local vitest config for fixture test discovery                                                                                                                                     |
+| `fixtures/truth-matrix/typescript/failing-build/lib/src/index.ts`  | New: Deliberate type error for deterministic build-only failure                                                                                                                         |
+| `fixtures/truth-matrix/typescript/failing-build/lib/tsconfig.json` | New: Project with `composite: true`                                                                                                                                                     |
+| `fixtures/truth-matrix/typescript/failing-build/tsconfig.json`     | New: References `lib` project for deterministic build failure                                                                                                                           |
+| `fixtures/truth-matrix/typescript/failing-build/README.md`         | New: Documents deterministic failure approach                                                                                                                                           |
+| `docs/verification-readiness.md`                                   | Updated: Documented dependency strategy (image-provisioned tools + repository-controlled wrapper scripts)                                                                               |
+
+### How to run
+
+```bash
+# Run host-subprocess E2E tests (requires working TypeScript toolchain in fixtures)
+$env:VERIFY_REAL_SANDBOX="1"
+pnpm test -- tests/batch-43-typescript-e2e.test.ts
+
+# Run host-subprocess E2E tests without gating (tests skip with explicit message)
+pnpm test -- tests/batch-43-typescript-e2e.test.ts
+
+# Run real sandbox E2E tests (requires external verify-sandbox process + identity)
+VERIFY_SANDBOX_PROCESS=/path/to/verify-sandbox \
+VERIFY_SANDBOX_IDENTITY=verify-sandbox-process-0.1.0 \
+VERIFY_SANDBOX_SNAPSHOT_ROOT=/path/to/snapshots \
+VERIFY_SANDBOX_DOCKER_EXECUTABLE=/usr/bin/docker \
+VERIFY_SANDBOX_DOCKER_HOST=unix:///var/run/docker.sock \
+VERIFY_SANDBOX_SYSTEM_ROOT=/system \
+VERIFY_SANDBOX_TEMP_ROOT=/tmp \
+pnpm test -- tests/batch-43-real-sandbox.test.ts
+
+# Run real sandbox E2E tests without gating (tests skip with explicit message)
+pnpm test -- tests/batch-43-real-sandbox.test.ts
+```
+
+### Test coverage
+
+- 26 tests across 2 describe blocks
+- Host-subprocess (10 tests): Healthy fixture, failing-test, failing-typecheck, failing-build, transport boundary, no fallback, evidence provenance, policy/result, determinism, explicit skip
+- Real sandbox (16 tests): Healthy fixture, failing-test, failing-typecheck, failing-build, execution provenance, snapshot identity/opaque, no host-side install, snapshot exclusion (all fixtures), snapshot content (all fixtures), executable permissions, snapshot reproducibility, explicit skip, no fallback, identity gate, determinism, wrapper git tracking
+- Provisioning and gating tests run locally without the external sandbox
+- Actual Docker-backed execution tests remain gated/skipped when the external Verify Sandbox is unavailable
+- All tests skip with clear messages when environment is not configured
+
+### Architecture
+
+```text
+fixture source files + sandbox-wrappers/ (Git-tracked wrapper scripts)
+  ↓
+clean snapshot provisioning (allowlist-based, materializes wrappers to node_modules/.bin/)
+  ↓
+createFileSystemDetectionContext()  [real, from @verify-agent/adapters-lang]
+  ↓
+createProjectDetectionService()    [real, from @verify-agent/adapters-lang]
+  ↓
+createCheckPlanner()               [real, from @verify-agent/checks]
+  ↓
+createSandboxExecutorFromTransport()  [real, from @verify-agent/engine]
+  ↓
+SubprocessSandboxTransport         [real — spawns sandbox-real-execution-harness.mjs]
+  ↓
+sandbox-real-execution-harness.mjs [real — executes pnpm exec tsc/vitest with shell:false]
+  ↓
+createCheckExecutor()              [real, from @verify-agent/engine]
+  ↓
+createVerificationPipeline()       [real, from @verify-agent/engine]
+  ↓
+aggregateVerification()            [real, from @verify-agent/engine]
+  ↓
+evaluateDefaultPolicy()            [real, from @verify-agent/policy]
+  ↓
+VerificationResult                 [executionSource: "real", content-hashed]
+```
+
+For real sandbox tests, the architecture is the same but the `SubprocessSandboxTransport` spawns the external `verify-sandbox` process instead of the local harness. The host provisions the snapshot store with clean allowlisted contents (source files + `sandbox-wrappers/` scripts); during provisioning, wrapper scripts are materialized as executable `node_modules/.bin/tsc` and `node_modules/.bin/vitest`. The sandbox Docker image provides pinned TypeScript 5.8.3 and Vitest 2.1.9 globally, so the sandbox can execute `pnpm exec tsc` and `pnpm exec vitest` without network access or runtime package installation.
+
+---
+
+## 20. Overclaim warning
 
 > Passing VerifyAgent's unit/integration tests does not by itself prove that VerifyAgent correctly verifies arbitrary repositories.
 

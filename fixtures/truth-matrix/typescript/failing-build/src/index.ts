@@ -2,4 +2,4 @@ export function add(a: number, b: number): number {
   return a + b;
 }
 
-export const result: string = add(1, 2);
+export const result: number = add(1, 2);
