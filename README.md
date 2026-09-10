@@ -38,7 +38,7 @@ This is not an AI code review tool. VerifyAgent gathers **evidence** about a sof
 
 ## Current status
 
-The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Real TypeScript/JavaScript end-to-end verification has been demonstrated against known-truth fixtures using both host-subprocess and external Docker-backed sandbox execution.
+The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Real TypeScript/JavaScript end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment.
 
 ### Implemented
 
