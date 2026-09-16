@@ -142,3 +142,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 operator-artifacts/
+
+# Rust
+target/
+Cargo.lock
