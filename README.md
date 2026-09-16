@@ -103,12 +103,28 @@ verify-agent/
   docs/                     Architecture, readiness audit, ADRs
 ```
 
+## Local CLI (dogfood)
+
+A local CLI entry point is provided for development and dogfooding. It runs the verification pipeline against a local repository directory.
+
+```bash
+# Run verification against a local repository
+pnpm verify <path> --allow-host-execution
+
+# JSON output
+pnpm verify <path> --allow-host-execution --json
+```
+
+**Important**: The local CLI executes repository tooling directly on the host machine. It is NOT sandbox-isolated and NOT the external `verify-sandbox`. Untrusted repositories should NOT be run through this mode. The `--allow-host-execution` flag is required to acknowledge this.
+
+The local CLI is a development tool, not a production execution boundary. Sandboxed execution remains a separate capability provided by the external `verify-sandbox` boundary.
+
 ## Security model
 
 - **Webhook integrity**: GitHub webhook signatures are verified over exact received bytes using HMAC-SHA256 with timing-safe comparison.
 - **Replay protection**: TTL-based reserve/commit/rollback prevents webhook replay at the application boundary.
 - **Source identity**: The PR head SHA is extracted, validated as 40-char hex, and used as the immutable source snapshot identity.
-- **Sandbox isolation**: Untrusted code execution is delegated to the external `verify-sandbox` boundary. VerifyAgent does not execute repository commands itself.
+- **Sandbox isolation**: Untrusted code execution is delegated to the external `verify-sandbox` boundary. VerifyAgent does not execute repository commands itself in production. The local CLI (dogfood mode) is an exception that executes on the host with explicit acknowledgement.
 - **Fail-closed transport**: `SubprocessSandboxTransport` uses `shell: false`, no host environment inheritance, bounded I/O, timeout enforcement, and JSON-lines protocol validation.
 - **Provenance tracking**: Execution source (`real`, `simulated`, `fixture`) is immutable per transport instance and propagated through the entire evidence chain.
 

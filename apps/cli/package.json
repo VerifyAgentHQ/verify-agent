@@ -1,0 +1,22 @@
+{
+  "name": "@verify-agent/cli",
+  "version": "0.1.0-phase0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "verify-agent": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --pretty false"
+  },
+  "dependencies": {
+    "@verify-agent/adapters-lang": "workspace:*",
+    "@verify-agent/checks": "workspace:*",
+    "@verify-agent/domain": "workspace:*",
+    "@verify-agent/engine": "workspace:*",
+    "@verify-agent/policy": "workspace:*"
+  }
+}

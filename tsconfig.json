@@ -30,6 +30,7 @@
     { "path": "./packages/adapters-lang" },
     { "path": "./packages/adapters-source" },
     { "path": "./packages/config" },
-    { "path": "./apps/api" }
+    { "path": "./apps/api" },
+    { "path": "./apps/cli" }
   ]
 }
