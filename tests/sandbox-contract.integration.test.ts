@@ -172,7 +172,7 @@ function queuedExecution(jobId: string) {
   };
 }
 
-function harnessTransport(timeout = 1000) {
+function harnessTransport(timeout = 5000) {
   return new SubprocessSandboxTransport({
     executable: process.execPath,
     args: [harnessPath],

@@ -8,19 +8,19 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: verify-agent
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: VerifyAgentHQ/verify-contracts
           path: verify-contracts
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.3
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -30,6 +30,8 @@ jobs:
       - run: pnpm format:check
         working-directory: verify-agent
       - run: pnpm typecheck
+        working-directory: verify-agent
+      - run: pnpm build
         working-directory: verify-agent
       - run: pnpm test
         working-directory: verify-agent

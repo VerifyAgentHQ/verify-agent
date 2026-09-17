@@ -24,12 +24,18 @@
 
 ## Required checks
 
-Before completion, run:
+Before considering a change complete, run:
 
-- `pnpm install --frozen-lockfile`
-- `pnpm format:check`
-- `pnpm typecheck`
-- `pnpm test`
+```text
+pnpm install --frozen-lockfile
+pnpm format:check
+pnpm typecheck
+pnpm build
+pnpm test
+git diff --check
+```
+
+A change is not considered complete until the corresponding GitHub Actions CI run passes after it is pushed.
 
 ## Prohibited actions
 

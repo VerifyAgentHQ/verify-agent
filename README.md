@@ -38,7 +38,7 @@ This is not an AI code review tool. VerifyAgent gathers **evidence** about a sof
 
 ## Current status
 
-The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Real TypeScript/JavaScript end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment.
+The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Real TypeScript and Rust end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment.
 
 ### Implemented
 
@@ -58,6 +58,7 @@ The verification core is implemented and tested. The pipeline from webhook authe
 | Policy evaluation           | Implemented | 5 deterministic rules, provider-independent                       |
 | VerificationResult          | Implemented | Immutable, content-hashed result assembly                         |
 | TypeScript E2E tests        | Implemented | 10 host-subprocess tests, 16 real sandbox tests                   |
+| Rust E2E tests              | Implemented | Host-subprocess E2E verification                                  |
 | Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                       |
 | API server                  | Implemented | HTTP health + verify endpoints                                    |
 | Worker boundary             | Implemented | Validates and delegates to application service                    |
@@ -117,14 +118,14 @@ pnpm verify <path> --allow-host-execution --json
 
 **Important**: The local CLI executes repository tooling directly on the host machine. It is NOT sandbox-isolated and NOT the external `verify-sandbox`. Untrusted repositories should NOT be run through this mode. The `--allow-host-execution` flag is required to acknowledge this.
 
-The local CLI is a development tool, not a production execution boundary. Sandboxed execution remains a separate capability provided by the external `verify-sandbox` boundary.
+The local CLI is a development tool, not a production execution boundary. The production architecture delegates untrusted code execution to the external `verify-sandbox` boundary.
 
 ## Security model
 
 - **Webhook integrity**: GitHub webhook signatures are verified over exact received bytes using HMAC-SHA256 with timing-safe comparison.
 - **Replay protection**: TTL-based reserve/commit/rollback prevents webhook replay at the application boundary.
 - **Source identity**: The PR head SHA is extracted, validated as 40-char hex, and used as the immutable source snapshot identity.
-- **Sandbox isolation**: Untrusted code execution is delegated to the external `verify-sandbox` boundary. VerifyAgent does not execute repository commands itself in production. The local CLI (dogfood mode) is an exception that executes on the host with explicit acknowledgement.
+- **Sandbox isolation**: Production verification delegates untrusted code execution to the external `verify-sandbox` boundary. The local CLI (dogfood mode) is an explicit exception that executes on the host with `--allow-host-execution` and is NOT sandbox-isolated.
 - **Fail-closed transport**: `SubprocessSandboxTransport` uses `shell: false`, no host environment inheritance, bounded I/O, timeout enforcement, and JSON-lines protocol validation.
 - **Provenance tracking**: Execution source (`real`, `simulated`, `fixture`) is immutable per transport instance and propagated through the entire evidence chain.
 
@@ -144,6 +145,9 @@ pnpm format:check
 
 # Typecheck
 pnpm typecheck
+
+# Build
+pnpm build
 
 # Run tests
 pnpm test
@@ -197,7 +201,9 @@ Project detection (TypeScript/JavaScript, Rust/Soroban)
 Check planning (deterministic, dependency-ordered)
         |
         v
-Sandbox execution (isolated boundary)
+Execution
+  Production: external verify-sandbox boundary (isolated)
+  Local CLI:   host-subprocess (--allow-host-execution required, NOT sandbox-isolated)
         |
         v
 Evidence aggregation
@@ -224,13 +230,15 @@ The architecture supports adding new ecosystems by implementing a `ProjectDetect
 
 - Verification core (domain, engine, checks, policy)
 - Sandbox integration architecture and E2E test coverage
-- Real TypeScript/JavaScript sandbox E2E verification
+- TypeScript host-subprocess E2E verification
+- Rust host-subprocess E2E verification
 - Truth-matrix fixtures (7 known-truth snapshots)
+- CI gate matching local pre-push validation
 
 ### Next
 
-- Real Rust/Soroban E2E verification
-- Further sandbox validation
+- External sandbox validation (requires `verify-sandbox` + Docker)
+- Actual Soroban contract execution (requires Soroban toolchain)
 - Durable execution infrastructure (workers, queue)
 - Production hardening (monitoring, rate limiting, credential management)
 - GitHub developer feedback loop (PR comments, status checks)
@@ -272,8 +280,12 @@ See `AGENTS.md` for development workflow, architecture guardrails, and required 
 pnpm install --frozen-lockfile
 pnpm format:check
 pnpm typecheck
+pnpm build
 pnpm test
+git diff --check
 ```
+
+A change is not considered complete until the corresponding GitHub Actions CI run passes after it is pushed.
 
 ## License
 
