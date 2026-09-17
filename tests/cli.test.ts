@@ -41,16 +41,21 @@ function getNodeExecutable(): string {
 }
 
 function getSystemPath(): string {
-  const paths: string[] = [];
-  const systemRoot = process.env.SYSTEMROOT ?? "C:\\Windows";
-  paths.push(join(systemRoot, "System32"));
-  const nodeDir = resolve(process.execPath, "..");
-  paths.push(nodeDir);
-  const npmGlobal = resolve(process.env.APPDATA ?? "", "npm");
-  if (existsSync(npmGlobal)) paths.push(npmGlobal);
-  const userLocal = resolve(process.env.USERPROFILE ?? "", ".local", "bin");
-  if (existsSync(userLocal)) paths.push(userLocal);
-  return process.platform === "win32" ? paths.join(";") : paths.join(":");
+  if (process.platform === "win32") {
+    const paths: string[] = [];
+    const systemRoot = process.env.SYSTEMROOT ?? "C:\\Windows";
+    paths.push(join(systemRoot, "System32"));
+    const nodeDir = resolve(process.execPath, "..");
+    paths.push(nodeDir);
+    const npmGlobal = resolve(process.env.APPDATA ?? "", "npm");
+    if (existsSync(npmGlobal)) paths.push(npmGlobal);
+    const userLocal = resolve(process.env.USERPROFILE ?? "", ".local", "bin");
+    if (existsSync(userLocal)) paths.push(userLocal);
+    return paths.join(";");
+  }
+  // On Unix (Linux, macOS), preserve the runner's normal PATH so child
+  // processes can find standard system utilities (node, pnpm, tsc, etc.).
+  return process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin";
 }
 
 function createLocalTransport(fixturePath: string) {

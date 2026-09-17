@@ -116,21 +116,26 @@ function getNodeExecutable(): string {
 }
 
 function getSystemPath(): string {
-  const paths: string[] = [];
-  const systemRoot = process.env.SYSTEMROOT ?? "C:\\Windows";
-  paths.push(join(systemRoot, "System32"));
-  const nodeDir = resolve(process.execPath, "..");
-  paths.push(nodeDir);
-  const npmGlobal = resolve(process.env.APPDATA ?? "", "npm");
-  if (existsSync(npmGlobal)) paths.push(npmGlobal);
-  const userLocal = resolve(process.env.USERPROFILE ?? "", ".local", "bin");
-  if (existsSync(userLocal)) paths.push(userLocal);
-  // Add Rust/Cargo bin directory
-  const cargoHome =
-    process.env.CARGO_HOME ?? join(process.env.USERPROFILE ?? "", ".cargo");
-  const cargoBin = join(cargoHome, "bin");
-  if (existsSync(cargoBin)) paths.push(cargoBin);
-  return process.platform === "win32" ? paths.join(";") : paths.join(":");
+  if (process.platform === "win32") {
+    const paths: string[] = [];
+    const systemRoot = process.env.SYSTEMROOT ?? "C:\\Windows";
+    paths.push(join(systemRoot, "System32"));
+    const nodeDir = resolve(process.execPath, "..");
+    paths.push(nodeDir);
+    const npmGlobal = resolve(process.env.APPDATA ?? "", "npm");
+    if (existsSync(npmGlobal)) paths.push(npmGlobal);
+    const userLocal = resolve(process.env.USERPROFILE ?? "", ".local", "bin");
+    if (existsSync(userLocal)) paths.push(userLocal);
+    // Add Rust/Cargo bin directory
+    const cargoHome =
+      process.env.CARGO_HOME ?? join(process.env.USERPROFILE ?? "", ".cargo");
+    const cargoBin = join(cargoHome, "bin");
+    if (existsSync(cargoBin)) paths.push(cargoBin);
+    return paths.join(";");
+  }
+  // On Unix (Linux, macOS), preserve the runner's normal PATH so child
+  // processes can find standard system utilities (node, cargo, tsc, etc.).
+  return process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin";
 }
 
 function cargoIsAvailable(): boolean {
