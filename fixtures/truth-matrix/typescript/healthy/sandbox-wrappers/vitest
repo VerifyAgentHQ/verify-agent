@@ -1,9 +1,16 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 "use strict";
 const { execFileSync } = require("node:child_process");
 const args = process.argv.slice(2);
+const cleanPath = (process.env.PATH || "")
+  .split(":")
+  .filter((p) => !p.includes("node_modules"))
+  .join(":");
 try {
-  execFileSync("vitest", args, { stdio: "inherit" });
+  execFileSync("vitest", args, {
+    stdio: "inherit",
+    env: { ...process.env, PATH: cleanPath },
+  });
 } catch (err) {
   process.exit(err.status ?? 1);
 }

@@ -143,6 +143,9 @@ vite.config.ts.timestamp-*
 .vite/
 operator-artifacts/
 
+# Temporary sandbox artifacts
+.tmp/
+
 # Rust
 target/
 Cargo.lock

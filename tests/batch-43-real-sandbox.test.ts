@@ -851,13 +851,23 @@ describe("Batch 43D — Real verify-sandbox TypeScript E2E (Docker-isolated)", (
       // Snapshot must NOT contain full vitest package (image-provisioned)
       expect(existsSync(join(snapshotPath, "node_modules/vitest"))).toBe(false);
 
-      // Snapshot must contain only expected entries (files + directories)
+      // Snapshot must contain only expected entries (files + directories).
+      // The allowlist contains relative paths like "src/index.ts" and
+      // "sandbox-wrappers". After provisioning:
+      //   - "sandbox-wrappers" is consumed and replaced by "node_modules"
+      //   - file paths like "src/index.ts" appear as their parent directory "src"
+      // Build the expected top-level entries from the allowlist.
+      const expectedTopLevel = new Set<string>();
+      for (const entry of SNAPSHOT_ALLOWLISTS[fixture.scenario]!) {
+        if (entry === "sandbox-wrappers") {
+          expectedTopLevel.add("node_modules");
+        } else {
+          expectedTopLevel.add(entry.split("/")[0]!);
+        }
+      }
       const topEntries = await readdir(snapshotPath, { withFileTypes: true });
       const topLevelNames = topEntries.map((e) => e.name).sort();
-      const expectedEntries = SNAPSHOT_ALLOWLISTS[fixture.scenario]!.map((e) =>
-        e.replace(/\/$/, ""),
-      ).sort();
-      expect(topLevelNames).toEqual(expectedEntries);
+      expect(topLevelNames).toEqual([...expectedTopLevel].sort());
     },
     30_000,
   );
