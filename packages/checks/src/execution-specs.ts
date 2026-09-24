@@ -9,6 +9,8 @@ export interface CheckExecutionSpec {
   readonly args: readonly string[];
   readonly workingDirectory: ".";
   readonly environment: Readonly<Record<string, string>>;
+  readonly memoryLimitBytes?: number;
+  readonly timeoutMs?: number;
 }
 
 const spec = (
@@ -16,6 +18,7 @@ const spec = (
   runtime: CheckRuntime,
   executable: string,
   args: readonly string[],
+  limits?: { readonly memoryLimitBytes?: number; readonly timeoutMs?: number },
 ): CheckExecutionSpec => ({
   checkId: checkId as CheckId,
   runtime,
@@ -23,6 +26,7 @@ const spec = (
   args,
   workingDirectory: ".",
   environment: {},
+  ...(limits === undefined ? {} : limits),
 });
 
 export const trustedExecutionSpecs: readonly CheckExecutionSpec[] = [
@@ -33,7 +37,10 @@ export const trustedExecutionSpecs: readonly CheckExecutionSpec[] = [
   spec("rust.check", "cargo", "cargo", ["check"]),
   spec("rust.test", "cargo", "cargo", ["test"]),
   spec("rust.clippy", "cargo", "cargo", ["clippy"]),
-  spec("soroban.contract-test", "cargo", "cargo", ["test"]),
+  spec("soroban.contract-test", "cargo", "cargo", ["test", "--offline"], {
+    memoryLimitBytes: 2 * 1024 * 1024 * 1024,
+    timeoutMs: 5 * 60 * 1000,
+  }),
 ];
 
 export interface TrustedExecutionSpecRegistry {

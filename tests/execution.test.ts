@@ -14,9 +14,11 @@ import {
   createCheckExecutor,
   createExecutionInputHash,
   createFakeSandboxExecutor,
+  DEFAULT_EXECUTION_LIMITS,
   mapCheckExecutionToSandboxJobRequest,
   toPublicSandboxJobRequest,
   transitionCheckExecution,
+  type ExecutionLimits,
   type SandboxJobResult,
 } from "../packages/engine/src/index.js";
 
@@ -181,5 +183,112 @@ describe("check execution orchestration", () => {
       createCheckExecutor(fake).execute(request({ definition: unknown })),
     ).rejects.toThrow("No trusted execution specification");
     expect(fake.requests).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Resource-limit selection
+// ===========================================================================
+
+const sorobanDefinition = createCheckDefinitionRegistry().find(
+  "soroban.contract-test",
+)!;
+const sorobanPlanItem: CheckPlanItem = {
+  checkId: sorobanDefinition.id,
+  checkVersion: sorobanDefinition.version,
+  applicability: "applicable",
+  required: true,
+  reason: "Soroban contract detected.",
+  priority: 80,
+  dependencies: [],
+  scope: "repository",
+};
+
+function sorobanRequest(
+  overrides: Partial<{ definition: CheckDefinition }> = {},
+) {
+  return {
+    project,
+    profile,
+    snapshot,
+    planItem: sorobanPlanItem,
+    definition: overrides.definition ?? sorobanDefinition,
+    execution: {
+      id: brandId<"CheckExecutionId">("soroban-exec-1"),
+      checkDefinitionId: sorobanDefinition.id,
+      jobId: brandId<"VerificationJobId">("job-1"),
+      inputsHash: "b".repeat(64),
+      status: "queued" as const,
+    },
+    resultId: "result-soroban-1",
+    createdAt: "2026-08-31T10:01:00Z",
+  };
+}
+
+describe("resource-limit selection", () => {
+  it("soroban spec has elevated limits in registry", () => {
+    const registry = createTrustedExecutionSpecRegistry();
+    const spec = registry.find("soroban.contract-test");
+    expect(spec).toBeDefined();
+    expect(spec!.memoryLimitBytes).toBe(2 * 1024 * 1024 * 1024);
+    expect(spec!.timeoutMs).toBe(5 * 60 * 1000);
+  });
+
+  it("ordinary check without explicit limits uses global defaults", () => {
+    const mapped = mapCheckExecutionToSandboxJobRequest(request());
+    expect(mapped.resourceLimits).toEqual({
+      timeoutMs: 120_000,
+      memoryLimitBytes: 512 * 1024 * 1024,
+    });
+  });
+
+  it("soroban.contract-test uses spec-defined elevated limits", () => {
+    const mapped = mapCheckExecutionToSandboxJobRequest(sorobanRequest());
+    expect(mapped.resourceLimits).toEqual({
+      timeoutMs: 5 * 60 * 1000,
+      memoryLimitBytes: 2 * 1024 * 1024 * 1024,
+    });
+  });
+
+  it("caller-provided limits are preserved for checks without spec limits", () => {
+    const callerLimits: ExecutionLimits = {
+      timeoutMs: 60_000,
+      memoryLimitBytes: 256 * 1024 * 1024,
+    };
+    const mapped = mapCheckExecutionToSandboxJobRequest(
+      request(),
+      createTrustedExecutionSpecRegistry(),
+      callerLimits,
+    );
+    expect(mapped.resourceLimits).toEqual(callerLimits);
+  });
+
+  it("spec limits override caller-provided limits", () => {
+    const callerLimits: ExecutionLimits = {
+      timeoutMs: 60_000,
+      memoryLimitBytes: 256 * 1024 * 1024,
+    };
+    const mapped = mapCheckExecutionToSandboxJobRequest(
+      sorobanRequest(),
+      createTrustedExecutionSpecRegistry(),
+      callerLimits,
+    );
+    expect(mapped.resourceLimits).toEqual({
+      timeoutMs: 5 * 60 * 1000,
+      memoryLimitBytes: 2 * 1024 * 1024 * 1024,
+    });
+  });
+
+  it("spec-defined limits remain within sandbox maximum bounds", () => {
+    const mapped = mapCheckExecutionToSandboxJobRequest(sorobanRequest());
+    expect(mapped.resourceLimits.memoryLimitBytes).toBeLessThanOrEqual(
+      1_099_511_627_776,
+    );
+    expect(mapped.resourceLimits.timeoutMs).toBeLessThanOrEqual(3_600_000);
+  });
+
+  it("global defaults remain at original values", () => {
+    expect(DEFAULT_EXECUTION_LIMITS.timeoutMs).toBe(120_000);
+    expect(DEFAULT_EXECUTION_LIMITS.memoryLimitBytes).toBe(512 * 1024 * 1024);
   });
 });

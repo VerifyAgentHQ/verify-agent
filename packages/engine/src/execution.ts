@@ -96,6 +96,21 @@ export function createExecutionInputHash(
   });
 }
 
+function resolveLimits(
+  spec: CheckExecutionSpec,
+  callerLimits?: ExecutionLimits,
+): ExecutionLimits {
+  const memoryLimitBytes =
+    spec.memoryLimitBytes ??
+    callerLimits?.memoryLimitBytes ??
+    DEFAULT_EXECUTION_LIMITS.memoryLimitBytes;
+  const timeoutMs =
+    spec.timeoutMs ??
+    callerLimits?.timeoutMs ??
+    DEFAULT_EXECUTION_LIMITS.timeoutMs;
+  return { memoryLimitBytes, timeoutMs };
+}
+
 export function mapCheckExecutionToSandboxJobRequest(
   request: CheckExecutionRequest,
   specRegistry = createTrustedExecutionSpecRegistry(),
@@ -112,7 +127,8 @@ export function mapCheckExecutionToSandboxJobRequest(
     throw new Error(
       `No trusted execution specification: ${String(request.definition.id)}`,
     );
-  const safeLimits = assertLimits(limits);
+  const resolved = resolveLimits(spec, limits);
+  const safeLimits = assertLimits(resolved);
   return Object.freeze({
     schemaVersion: "1.0.0",
     jobId: request.execution.jobId,
