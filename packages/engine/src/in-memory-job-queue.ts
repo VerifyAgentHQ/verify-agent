@@ -9,6 +9,7 @@ import {
  *
  * - Preserves insertion order.
  * - Freezes enqueued jobs and exposes only frozen snapshots.
+ * - Supports FIFO consumption through `dequeue()` for application runtimes.
  * - No timers, background workers, durability, retries, or global state.
  * - Each instance owns its entries; instances never share state.
  */
@@ -16,6 +17,13 @@ export interface InMemoryVerificationJobQueue extends VerificationJobQueue {
   readonly jobs: readonly VerificationQueueJob[];
   size(): number;
   clear(): void;
+  /**
+   * Remove and return the oldest queued job, or `null` when empty.
+   *
+   * Returned jobs are the same frozen values exposed through `jobs`.
+   * Consumption is explicit and deterministic: no polling, no timers.
+   */
+  dequeue(): Promise<VerificationQueueJob | null>;
 }
 
 function freezeJob(job: VerificationQueueJob): VerificationQueueJob {
@@ -35,6 +43,11 @@ export function createInMemoryVerificationJobQueue(): InMemoryVerificationJobQue
     async enqueue(job: VerificationQueueJob): Promise<void> {
       validateVerificationQueueJob(job);
       entries.push(freezeJob(job));
+    },
+
+    async dequeue(): Promise<VerificationQueueJob | null> {
+      const next = entries.shift();
+      return next ?? null;
     },
 
     get jobs(): readonly VerificationQueueJob[] {

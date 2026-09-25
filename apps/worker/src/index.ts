@@ -24,6 +24,25 @@ export function createVerificationJobProcessor(
   };
 }
 
+export type {
+  ConsumableVerificationJobQueue,
+  VerificationJobRuntime,
+  VerificationJobRuntimeOptions,
+  VerificationJobRuntimeOutcome,
+} from "./runtime.js";
+export {
+  VerificationJobRuntimeError,
+  createVerificationJobRuntime,
+} from "./runtime.js";
+export type {
+  InMemoryVerificationResultRegistryOptions,
+  VerificationResultRegistry,
+} from "./result-registry.js";
+export {
+  DEFAULT_MAX_VERIFICATION_RESULTS,
+  createInMemoryVerificationResultRegistry,
+} from "./result-registry.js";
+
 export const workerBoundary = {
   status: "implemented-batch38",
   purpose:
