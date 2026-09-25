@@ -709,12 +709,18 @@ export async function handleGitHubWebhookHttpRequest(
         if (options.replayGuard && deliveryId) {
           options.replayGuard.commit(deliveryId);
         }
+        const queueJobId =
+          orchestration.kind === "enqueued"
+            ? (orchestration as { job?: { jobId?: unknown } }).job?.jobId
+            : undefined;
         sendJson(response, 202, {
           status: orchestration.kind === "ignored" ? "ignored" : "accepted",
           deliveryId,
           ...(orchestration.kind === "ignored"
             ? { reason: orchestration.reason }
-            : {}),
+            : typeof queueJobId === "string" && queueJobId.length > 0
+              ? { queueJobId }
+              : {}),
         });
       } catch (error) {
         if (options.replayGuard && deliveryId && reserved) {

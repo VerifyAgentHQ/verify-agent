@@ -20,6 +20,23 @@ export interface VerificationJobQueue {
 }
 
 const IDENTIFIER_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+/**
+ * Batch 50 — single domain-level queue-job ID contract.
+ *
+ * The queue-job ID has no domain maximum length: any non-empty string
+ * matching `IDENTIFIER_RE` is valid. HTTP and queue boundaries must reuse
+ * this validator instead of inventing a second maximum.
+ */
+export const VERIFICATION_QUEUE_JOB_ID_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+export function isValidVerificationQueueJobId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    VERIFICATION_QUEUE_JOB_ID_PATTERN.test(value)
+  );
+}
 const ISO_DATE_RE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 

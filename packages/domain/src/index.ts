@@ -11,6 +11,7 @@ export * from "./findings.js";
 export * from "./policy.js";
 export * from "./verification.js";
 export * from "./verification-queue.js";
+export * from "./verification-result-reader.js";
 export * from "./validation.js";
 export * from "./immutability.js";
 export * from "./contract-mapping.js";

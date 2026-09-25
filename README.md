@@ -38,7 +38,7 @@ This is not an AI code review tool. VerifyAgent gathers **evidence** about a sof
 
 ## Current status
 
-The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Authenticated GitHub PR events are composed through queue → worker → source resolution → verification service in a focused integration proof (`tests/batch-48-pr-verification-composition.test.ts`, in-memory queue with manual worker consumption). An in-process job runtime consumes queued jobs through the existing worker and exposes completed results through a bounded in-memory registry (`tests/batch-49-job-runtime.test.ts`; process-local, non-durable, no background deployment). The registry correlates each originating `VerificationQueueJob.jobId` with its `VerificationResult` without merging the queue and result identity domains. Real TypeScript and Rust end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment.
+The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Authenticated GitHub PR events are composed through queue → worker → source resolution → verification service in a focused integration proof (`tests/batch-48-pr-verification-composition.test.ts`, in-memory queue with manual worker consumption). An in-process job runtime consumes queued jobs through the existing worker and exposes completed results through a bounded in-memory registry (`tests/batch-49-job-runtime.test.ts`; process-local, non-durable, no background deployment). The registry correlates each originating `VerificationQueueJob.jobId` with its `VerificationResult` without merging the queue and result identity domains. Asynchronous Verification Result Observation (`tests/batch-50-async-result.test.ts`) exposes retained results via the explicitly protected `GET /verification-jobs/:queueJobId/result` route through the provider-neutral `VerificationResultReader` port plus a dedicated internal result bearer token (`Authorization: Bearer <token>`, configured via `VERIFY_INTERNAL_RESULT_TOKEN`); the authenticated webhook `202` response returns the originating `queueJobId` lookup handle, which is only a correlation handle and never an authentication credential. Batch 50 is asynchronous result observation that is process-local, bounded, non-durable, explicitly protected, and not yet a general public production result API: `200` means a result is currently retained (authenticated callers only), `401` means missing/invalid internal token with no existence oracle, `404` means no retained result is currently available (not completed yet, evicted, restarted, or unknown) and never claims verification never happened. Normal configured API startup wires no result reader/token, so the async result route is unavailable there (`404 route not found`). Real TypeScript and Rust end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment.
 
 ### Implemented
 
@@ -60,7 +60,7 @@ The verification core is implemented and tested. The pipeline from webhook authe
 | TypeScript E2E tests        | Implemented | 10 host-subprocess tests, 16 real sandbox tests                   |
 | Rust E2E tests              | Implemented | Host-subprocess E2E verification                                  |
 | Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                       |
-| API server                  | Implemented | HTTP health + verify endpoints                                    |
+| API server                  | Implemented | HTTP health + verify + async result endpoints                     |
 | Worker boundary             | Implemented | Validates and delegates to application service                    |
 
 ### Partial / conditional
@@ -86,7 +86,7 @@ The verification core is implemented and tested. The pipeline from webhook authe
 ```text
 verify-agent/
   apps/
-    api/                    HTTP server (health + verify endpoints)
+    api/                    HTTP server (health + verify + async result endpoints)
     github-bot/             Webhook auth, replay guard, orchestrator
     worker/                 Job processor boundary
   packages/
