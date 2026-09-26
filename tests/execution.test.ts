@@ -16,9 +16,12 @@ import {
   createFakeSandboxExecutor,
   DEFAULT_EXECUTION_LIMITS,
   mapCheckExecutionToSandboxJobRequest,
+  mapSandboxJobResultToCheckResult,
   toPublicSandboxJobRequest,
+  toSandboxWireJobId,
   transitionCheckExecution,
   type ExecutionLimits,
+  type SandboxJobRequest,
   type SandboxJobResult,
 } from "../packages/engine/src/index.js";
 
@@ -290,5 +293,164 @@ describe("resource-limit selection", () => {
   it("global defaults remain at original values", () => {
     expect(DEFAULT_EXECUTION_LIMITS.timeoutMs).toBe(120_000);
     expect(DEFAULT_EXECUTION_LIMITS.memoryLimitBytes).toBe(512 * 1024 * 1024);
+  });
+});
+
+// ===========================================================================
+// Batch 52 — sandbox wire job identity
+//
+// Internal execution IDs legitimately contain `:` (queue-derived IDs such as
+// `owner:repo:sha-job`), while the external sandbox Docker backend accepts
+// only `[A-Za-z0-9._-]`. The wire adapter translates at the sandbox-request
+// boundary; internal identity domains are unchanged.
+// ===========================================================================
+
+const WIRE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// Mirrors the Batch 52 service path: queue source `owner:repo:sha` plus `-job`.
+const COLON_JOB_ID = `octocat:hello-world:${"d".repeat(40)}-job`;
+const OTHER_COLON_JOB_ID = `octocat:hello-world:${"e".repeat(40)}-job`;
+
+function colonRequest(jobId: string = COLON_JOB_ID) {
+  const base = request();
+  return {
+    ...base,
+    execution: {
+      ...base.execution,
+      jobId: brandId<"VerificationJobId">(jobId),
+    },
+  };
+}
+
+function wireResultFor(jobId: string): SandboxJobResult {
+  return {
+    schemaVersion: "1.0.0",
+    jobId,
+    status: "completed",
+    exitCode: 0,
+    durationMs: 25,
+    logsRef: "logs/wire",
+    artifactRefs: [],
+    resourceUsage: { memoryBytes: 1024, cpuTimeMs: 12 },
+    errors: [],
+  };
+}
+
+describe("sandbox wire job identity", () => {
+  it("leaves already-safe internal job IDs unchanged", () => {
+    expect(toSandboxWireJobId("job-1")).toBe("job-1");
+    expect(toSandboxWireJobId("job-abc-123")).toBe("job-abc-123");
+    expect(mapCheckExecutionToSandboxJobRequest(request()).jobId).toBe("job-1");
+  });
+
+  it("maps a colon-containing internal ID to a backend-safe wire ID", () => {
+    const wire = toSandboxWireJobId(COLON_JOB_ID);
+    expect(wire).toMatch(WIRE_JOB_ID);
+    expect(wire).not.toContain(":");
+    expect(wire.length).toBeLessThanOrEqual(128);
+    const mapped = mapCheckExecutionToSandboxJobRequest(colonRequest());
+    expect(mapped.jobId).toBe(wire);
+    expect(toPublicSandboxJobRequest(mapped).jobId).toBe(wire);
+  });
+
+  it("derives the wire ID deterministically", () => {
+    expect(toSandboxWireJobId(COLON_JOB_ID)).toBe(
+      toSandboxWireJobId(COLON_JOB_ID),
+    );
+    expect(mapCheckExecutionToSandboxJobRequest(colonRequest()).jobId).toBe(
+      mapCheckExecutionToSandboxJobRequest(colonRequest()).jobId,
+    );
+  });
+
+  it("does not collapse distinct internal IDs onto one wire ID", () => {
+    const first = toSandboxWireJobId(COLON_JOB_ID);
+    const second = toSandboxWireJobId(OTHER_COLON_JOB_ID);
+    expect(first).toMatch(WIRE_JOB_ID);
+    expect(second).toMatch(WIRE_JOB_ID);
+    expect(second).not.toBe(first);
+  });
+
+  it("retains the internal execution ID while sending the wire ID", async () => {
+    const wire = toSandboxWireJobId(COLON_JOB_ID);
+    const seen: SandboxJobRequest[] = [];
+    const fake = createFakeSandboxExecutor((req) => {
+      seen.push(req);
+      return wireResultFor(wire);
+    });
+    const outcome = await createCheckExecutor(fake).execute(colonRequest());
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.jobId).toBe(wire);
+    expect(outcome.request.jobId).toBe(wire);
+    expect(outcome.execution.jobId).toBe(COLON_JOB_ID);
+    expect(outcome.result.status).toBe("passed");
+  });
+
+  it("rejects a sandbox response carrying the wrong safe ID", async () => {
+    const fake = createFakeSandboxExecutor(() =>
+      wireResultFor("job-some-other-id"),
+    );
+    await expect(
+      createCheckExecutor(fake).execute(colonRequest()),
+    ).rejects.toThrow("sandbox result job does not match check execution");
+  });
+
+  it("rejects empty internal job IDs fail-closed", () => {
+    expect(() => toSandboxWireJobId("")).toThrow();
+  });
+});
+
+// ===========================================================================
+// Batch 52 — sandbox error results preserve the real sandbox error
+// ===========================================================================
+
+describe("sandbox error result mapping", () => {
+  it("keeps the sandbox errors in the check result summary", async () => {
+    const wire = toSandboxWireJobId(COLON_JOB_ID);
+    const fake = createFakeSandboxExecutor(() => ({
+      ...wireResultFor(wire),
+      status: "error" as const,
+      exitCode: undefined,
+      logsRef: "",
+      errors: ["invalid request: unsafe job id"],
+    }));
+    const outcome = await createCheckExecutor(fake).execute(colonRequest());
+    expect(outcome.result.status).toBe("error");
+    expect(outcome.result.summary).toContain("invalid request: unsafe job id");
+    expect(outcome.result.summary).not.toContain("invalid logsRef");
+  });
+
+  it("still binds the error result to the derived wire ID", () => {
+    const wire = toSandboxWireJobId(COLON_JOB_ID);
+    const terminal = {
+      ...transitionCheckExecution(
+        transitionCheckExecution(colonRequest().execution, "running"),
+        "failed",
+      ),
+      executionSource: "simulated" as const,
+    };
+    const mapped = mapSandboxJobResultToCheckResult(
+      { ...colonRequest(), execution: terminal },
+      terminal,
+      {
+        ...wireResultFor(wire),
+        status: "error" as const,
+        exitCode: undefined,
+        logsRef: "",
+        errors: ["invalid request: unsafe job id"],
+      },
+    );
+    expect(mapped.status).toBe("error");
+    expect(() =>
+      mapSandboxJobResultToCheckResult(
+        { ...colonRequest(), execution: terminal },
+        terminal,
+        {
+          ...wireResultFor("job-some-other-id"),
+          status: "error" as const,
+          exitCode: undefined,
+          logsRef: "",
+          errors: ["boom"],
+        },
+      ),
+    ).toThrow("sandbox result job does not match check execution");
   });
 });

@@ -164,6 +164,83 @@ describe("sandbox transport boundary", () => {
     ).rejects.toThrow(SandboxTransportError);
   });
 
+  it("accepts an error result with an empty logsRef and preserves errors", () => {
+    // Batch 52 — the real external sandbox emits logsRef "" with
+    // status "error" when no log artifact exists. The canonical schema
+    // sets no minLength on logsRef; the real errors must survive.
+    const validated = validateSandboxJobResult(
+      {
+        schemaVersion: "1.0.0",
+        jobId: request.jobId,
+        status: "error",
+        durationMs: 1,
+        logsRef: "",
+        artifactRefs: [],
+        resourceUsage: { memoryBytes: 0, cpuTimeMs: 0 },
+        errors: ["invalid request: unsafe job id"],
+      },
+      request.jobId,
+    );
+    expect(validated.status).toBe("error");
+    expect(validated.logsRef).toBe("");
+    expect(validated.errors).toEqual(["invalid request: unsafe job id"]);
+  });
+
+  it("still rejects an empty logsRef on successful results", () => {
+    expect(() =>
+      validateSandboxJobResult(
+        {
+          schemaVersion: "1.0.0",
+          jobId: request.jobId,
+          status: "completed",
+          exitCode: 0,
+          durationMs: 1,
+          logsRef: "",
+          artifactRefs: [],
+          resourceUsage: { memoryBytes: 0, cpuTimeMs: 0 },
+          errors: [],
+        },
+        request.jobId,
+      ),
+    ).toThrow(SandboxProtocolError);
+  });
+
+  it("still rejects a malformed non-empty logsRef on error results", () => {
+    expect(() =>
+      validateSandboxJobResult(
+        {
+          schemaVersion: "1.0.0",
+          jobId: request.jobId,
+          status: "error",
+          durationMs: 1,
+          logsRef: "logs/file name.txt",
+          artifactRefs: [],
+          resourceUsage: { memoryBytes: 0, cpuTimeMs: 0 },
+          errors: ["boom"],
+        },
+        request.jobId,
+      ),
+    ).toThrow(SandboxProtocolError);
+  });
+
+  it("still rejects a wrong job ID even with an empty error logsRef", () => {
+    expect(() =>
+      validateSandboxJobResult(
+        {
+          schemaVersion: "1.0.0",
+          jobId: "job-some-other-id",
+          status: "error",
+          durationMs: 1,
+          logsRef: "",
+          artifactRefs: [],
+          resourceUsage: { memoryBytes: 0, cpuTimeMs: 0 },
+          errors: ["boom"],
+        },
+        request.jobId,
+      ),
+    ).toThrow(SandboxProtocolError);
+  });
+
   it("does not expose host environment or arbitrary execution configuration", () => {
     expect(internalRequest.commands[0]).toMatchObject({
       executable: "cargo",

@@ -32,6 +32,7 @@ export {
   mapCheckExecutionToSandboxJobRequest,
   mapSandboxJobResultToCheckResult,
   toPublicSandboxJobRequest,
+  toSandboxWireJobId,
   transitionCheckExecution,
 } from "./execution.js";
 export {

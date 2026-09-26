@@ -111,6 +111,42 @@ function resolveLimits(
   return { memoryLimitBytes, timeoutMs };
 }
 
+/**
+ * Batch 52 — sandbox wire job identity.
+ *
+ * VerifyAgent internal execution identities legitimately contain characters
+ * (notably `:` in queue-derived IDs such as `owner:repo:sha-job`) that the
+ * external sandbox Docker backend rejects for container naming (it accepts
+ * only `[A-Za-z0-9._-]`). This adapter derives the wire identity sent to the
+ * sandbox without touching any internal identity domain: queue, result,
+ * snapshot, and `CheckExecution.jobId` semantics are unchanged.
+ *
+ * Already-safe IDs pass through unchanged; anything else maps
+ * deterministically to `job-<sha256-hex>` (68 chars, well below the
+ * 256-char protocol limit and the backend's 128-char container limit).
+ * Digest derivation (instead of character substitution) cannot collide two
+ * distinct internal IDs that differ only in unsafe characters.
+ */
+const SANDBOX_WIRE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const SANDBOX_WIRE_JOB_ID_MAX = 128;
+
+export function toSandboxWireJobId(internalJobId: string): string {
+  if (
+    typeof internalJobId !== "string" ||
+    internalJobId.length === 0 ||
+    internalJobId.length > 256
+  ) {
+    throw new Error("sandbox wire job identity requires a non-empty job id");
+  }
+  if (
+    internalJobId.length <= SANDBOX_WIRE_JOB_ID_MAX &&
+    SANDBOX_WIRE_JOB_ID.test(internalJobId)
+  ) {
+    return internalJobId;
+  }
+  return `job-${createHash("sha256").update(internalJobId, "utf8").digest("hex")}`;
+}
+
 export function mapCheckExecutionToSandboxJobRequest(
   request: CheckExecutionRequest,
   specRegistry = createTrustedExecutionSpecRegistry(),
@@ -131,7 +167,7 @@ export function mapCheckExecutionToSandboxJobRequest(
   const safeLimits = assertLimits(resolved);
   return Object.freeze({
     schemaVersion: "1.0.0",
-    jobId: request.execution.jobId,
+    jobId: toSandboxWireJobId(request.execution.jobId),
     source: toPublicSourceReference(request.snapshot.source),
     snapshot: request.snapshot.sourceState.value,
     commands: Object.freeze([commandFromSpec(spec)]),
@@ -205,7 +241,11 @@ export function mapSandboxJobResultToCheckResult(
     throw new Error(
       "check execution provenance is required before result mapping",
     );
-  if (sandboxResult.jobId !== execution.jobId)
+  // Correlate against the exact derived wire identity: the sandbox echoes
+  // the translated job ID, never the internal execution ID. Recomputing the
+  // derivation (rather than trusting any valid-looking ID) keeps result
+  // acceptance bound to this execution.
+  if (sandboxResult.jobId !== toSandboxWireJobId(execution.jobId))
     throw new Error("sandbox result job does not match check execution");
   if (
     !["completed", "failed", "timed_out", "cancelled"].includes(

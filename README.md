@@ -238,8 +238,7 @@ The architecture supports adding new ecosystems by implementing a `ProjectDetect
 
 ### Next
 
-- External sandbox validation (requires `verify-sandbox` + Docker)
-- Actual Soroban contract execution (requires Soroban toolchain)
+- Runnable-service E2E through the external sandbox (component-level TypeScript/Soroban real-sandbox proofs exist; service-level coverage in `tests/batch-52-real-service-sandbox-e2e.test.ts` is gated on `verify-sandbox` + Docker + `VERIFY_SANDBOX_IDENTITY`)
 - Durable execution infrastructure (workers, queue)
 - Production hardening (monitoring, rate limiting, credential management)
 - GitHub developer feedback loop (PR comments, status checks)

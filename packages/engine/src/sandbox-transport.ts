@@ -180,9 +180,18 @@ export function validateSandboxJobResult(
     throw new SandboxProtocolError("sandbox result jobId mismatch");
   if (typeof object.status !== "string" || !SANDBOX_STATUSES.has(object.status))
     throw new SandboxProtocolError("invalid sandbox result status");
+  const status = object.status as PublicSandboxJobResult["status"];
   const durationMs = integerField(object.durationMs, "durationMs", 0);
+  // Batch 52 — the real external sandbox legitimately emits an empty
+  // logsRef with `status: "error"` when no log artifact exists for the
+  // failure (the canonical schema sets no minLength on logsRef, and an
+  // empty string is a valid URI-reference). Accept exactly that shape so
+  // the real `errors[]` survive; every other shape keeps strict
+  // URI-reference validation and no URI is ever fabricated.
   const logsRef =
-    typeof object.logsRef === "string" && isValidUriReference(object.logsRef)
+    typeof object.logsRef === "string" &&
+    (isValidUriReference(object.logsRef) ||
+      (status === "error" && object.logsRef === ""))
       ? object.logsRef
       : (() => {
           throw new SandboxProtocolError("invalid logsRef");
@@ -215,7 +224,7 @@ export function validateSandboxJobResult(
   return {
     schemaVersion: SCHEMA_VERSION,
     jobId,
-    status: object.status as PublicSandboxJobResult["status"],
+    status,
     ...(exitCode === undefined ? {} : { exitCode }),
     durationMs,
     logsRef,
