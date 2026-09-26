@@ -1,14 +1,23 @@
-import type { VerificationResult } from "../../../packages/domain/src/verification.js";
-import type { VerificationQueueJob } from "../../../packages/domain/src/verification-queue.js";
-import { validateVerificationQueueJob } from "../../../packages/domain/src/verification-queue.js";
-import type { VerificationApplicationService } from "../../../packages/engine/src/application-service.js";
+import type {
+  SnapshotSourceReference,
+  VerificationResult,
+  VerificationQueueJob,
+} from "@verify-agent/domain";
+import { validateVerificationQueueJob } from "@verify-agent/domain";
 
 export interface VerificationJobProcessor {
   process(job: VerificationQueueJob): Promise<VerificationResult>;
 }
 
 export function createVerificationJobProcessor(
-  applicationService: Pick<VerificationApplicationService, "verifySource">,
+  applicationService: Pick<
+    {
+      verifySource(input: {
+        readonly source: SnapshotSourceReference;
+      }): Promise<VerificationResult>;
+    },
+    "verifySource"
+  >,
 ): VerificationJobProcessor {
   if (
     !applicationService ||
@@ -29,6 +38,7 @@ export type {
   VerificationJobRuntime,
   VerificationJobRuntimeOptions,
   VerificationJobRuntimeOutcome,
+  VerificationJobSettledOutcome,
 } from "./runtime.js";
 export {
   VerificationJobRuntimeError,
@@ -44,7 +54,7 @@ export {
 } from "./result-registry.js";
 
 export const workerBoundary = {
-  status: "implemented-batch38",
+  status: "implemented-batch51",
   purpose:
-    "Provider-neutral VerificationQueueJob → VerificationApplicationService boundary. No webhook, GitHub, queue infrastructure, or background loop.",
+    "Provider-neutral VerificationQueueJob → VerificationApplicationService boundary. No webhook, GitHub, queue infrastructure, durability, or retries. Consumption is explicit by default with opt-in automatic in-process consumption owned by the application.",
 };

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { decideGitHubPullRequestEvent } from "../../../packages/adapters-source/src/github-pr.js";
-import type { GitHubPullRequestEvent } from "../../../packages/adapters-source/src/github-pr.js";
+import { decideGitHubPullRequestEvent } from "@verify-agent/adapters-source";
+import type { GitHubPullRequestEvent } from "@verify-agent/adapters-source";
 import type {
   VerificationJobQueue,
   VerificationQueueJob,
-} from "../../../packages/domain/src/verification-queue.js";
-import { createVerificationQueueJob } from "../../../packages/domain/src/verification-queue.js";
+} from "@verify-agent/domain";
+import { createVerificationQueueJob } from "@verify-agent/domain";
 
 export type GitHubVerificationOrchestrationResult =
   | { readonly kind: "ignored"; readonly reason: string }

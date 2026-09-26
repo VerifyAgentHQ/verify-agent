@@ -8,11 +8,7 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
-    { "path": "../../packages/domain" },
-    { "path": "../../packages/engine" },
     { "path": "../../packages/adapters-source" },
-    { "path": "../../packages/adapters-lang" },
-    { "path": "../worker" },
-    { "path": "../github-bot" }
+    { "path": "../../packages/domain" }
   ]
 }

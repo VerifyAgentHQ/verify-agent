@@ -255,14 +255,21 @@ export interface VerificationApiOptions {
   readonly internalResultToken?: string | null;
 }
 
-export function createVerificationApi(
+/**
+ * Batch 51 — reusable API request listener for single-process composition.
+ *
+ * Exposes the same `handleRequest` boundary used by `createVerificationApi`
+ * so a composed service can multiplex webhook + API routes on one HTTP
+ * server without duplicating the API boundary or creating a second server.
+ */
+export function createVerificationRequestListener(
   applicationService: Pick<VerificationApplicationServiceType, "verifySource">,
   resultReader?: VerificationResultReader | null,
   options: VerificationApiOptions = {},
-): VerificationApi {
+): (request: IncomingMessage, response: ServerResponse) => void {
   const internalResultToken =
     normalizeConfiguredToken(options.internalResultToken) ?? null;
-  const server = createServer((request, response) => {
+  return (request, response) => {
     void handleRequest(
       request,
       response,
@@ -270,7 +277,21 @@ export function createVerificationApi(
       resultReader,
       internalResultToken,
     );
-  });
+  };
+}
+
+export function createVerificationApi(
+  applicationService: Pick<VerificationApplicationServiceType, "verifySource">,
+  resultReader?: VerificationResultReader | null,
+  options: VerificationApiOptions = {},
+): VerificationApi {
+  const server = createServer(
+    createVerificationRequestListener(
+      applicationService,
+      resultReader,
+      options,
+    ),
+  );
   return {
     server,
     close: () =>
@@ -319,7 +340,7 @@ function readPort(value: string | undefined): number {
   return port;
 }
 
-function createConfiguredApplicationService(): VerificationApplicationService {
+export function createConfiguredApplicationService(): VerificationApplicationService {
   const executable = process.env.VERIFY_SANDBOX_PROCESS;
   if (!executable) {
     throw new Error("VERIFY_SANDBOX_PROCESS must be configured");

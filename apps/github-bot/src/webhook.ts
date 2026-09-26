@@ -4,8 +4,8 @@ import {
   decideGitHubPullRequestEvent,
   type GitHubPullRequestDecision,
   type GitHubPullRequestEvent,
-} from "../../../packages/adapters-source/src/github-pr.js";
-import { InvalidSourceReferenceError } from "../../../packages/adapters-source/src/resolver.js";
+} from "@verify-agent/adapters-source";
+import { InvalidSourceReferenceError } from "@verify-agent/adapters-source";
 import type { GitHubVerificationOrchestrator } from "./verification-orchestrator.js";
 
 export class GitHubWebhookAuthenticationError extends Error {
@@ -741,7 +741,7 @@ export async function handleGitHubWebhookHttpRequest(
       replayGuard: options.replayGuard,
     });
 
-    if (result.kind === "verify") {
+    if (result.kind === "verify" && result.decision.kind === "verify") {
       sendJson(response, 200, {
         status: "accepted",
         source: result.decision.source,

@@ -1,5 +1,5 @@
-import type { VerificationResult } from "../../../packages/domain/src/verification.js";
-import { validateVerificationResult } from "../../../packages/domain/src/validation.js";
+import type { VerificationResult } from "@verify-agent/domain";
+import { validateVerificationResult } from "@verify-agent/domain";
 
 export const DEFAULT_MAX_VERIFICATION_RESULTS = 100;
 

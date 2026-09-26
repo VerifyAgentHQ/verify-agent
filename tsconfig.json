@@ -31,6 +31,8 @@
     { "path": "./packages/adapters-source" },
     { "path": "./packages/config" },
     { "path": "./apps/api" },
-    { "path": "./apps/cli" }
+    { "path": "./apps/cli" },
+    { "path": "./apps/worker" },
+    { "path": "./apps/github-bot" }
   ]
 }

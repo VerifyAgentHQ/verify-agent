@@ -38,38 +38,39 @@ This is not an AI code review tool. VerifyAgent gathers **evidence** about a sof
 
 ## Current status
 
-The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Authenticated GitHub PR events are composed through queue → worker → source resolution → verification service in a focused integration proof (`tests/batch-48-pr-verification-composition.test.ts`, in-memory queue with manual worker consumption). An in-process job runtime consumes queued jobs through the existing worker and exposes completed results through a bounded in-memory registry (`tests/batch-49-job-runtime.test.ts`; process-local, non-durable, no background deployment). The registry correlates each originating `VerificationQueueJob.jobId` with its `VerificationResult` without merging the queue and result identity domains. Asynchronous Verification Result Observation (`tests/batch-50-async-result.test.ts`) exposes retained results via the explicitly protected `GET /verification-jobs/:queueJobId/result` route through the provider-neutral `VerificationResultReader` port plus a dedicated internal result bearer token (`Authorization: Bearer <token>`, configured via `VERIFY_INTERNAL_RESULT_TOKEN`); the authenticated webhook `202` response returns the originating `queueJobId` lookup handle, which is only a correlation handle and never an authentication credential. Batch 50 is asynchronous result observation that is process-local, bounded, non-durable, explicitly protected, and not yet a general public production result API: `200` means a result is currently retained (authenticated callers only), `401` means missing/invalid internal token with no existence oracle, `404` means no retained result is currently available (not completed yet, evicted, restarted, or unknown) and never claims verification never happened. Normal configured API startup wires no result reader/token, so the async result route is unavailable there (`404 route not found`). Real TypeScript and Rust end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment.
+The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Authenticated GitHub PR events are composed through queue → worker → source resolution → verification service in a focused integration proof (`tests/batch-48-pr-verification-composition.test.ts`, in-memory queue with manual worker consumption). An in-process job runtime consumes queued jobs through the existing worker and exposes completed results through a bounded in-memory registry (`tests/batch-49-job-runtime.test.ts`; process-local, non-durable, no background deployment). The registry correlates each originating `VerificationQueueJob.jobId` with its `VerificationResult` without merging the queue and result identity domains. Asynchronous Verification Result Observation (`tests/batch-50-async-result.test.ts`) exposes retained results via the explicitly protected `GET /verification-jobs/:queueJobId/result` route through the provider-neutral `VerificationResultReader` port plus a dedicated internal result bearer token (`Authorization: Bearer <token>`, configured via `VERIFY_INTERNAL_RESULT_TOKEN`); the authenticated webhook `202` response returns the originating `queueJobId` lookup handle, which is only a correlation handle and never an authentication credential. Batch 50 is asynchronous result observation that is process-local, bounded, non-durable, explicitly protected, and not yet a general public production result API: `200` means a result is currently retained (authenticated callers only), `401` means missing/invalid internal token with no existence oracle, `404` means no retained result is currently available (not completed yet, evicted, restarted, or unknown) and never claims verification never happened. Normal configured API-only startup wires no result reader/token, so the async result route is unavailable there (`404 route not found`). Real TypeScript and Rust end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment. Batch 51 adds a runnable single-process GitHub verification service (`apps/api/src/github-verification-service.ts`, proven in `tests/batch-51-github-verification-service.test.ts`): one shared in-memory queue, one application-owned runtime with automatic event-driven in-process consumption (no manual `processNext()`), one worker, one bounded result registry, and one protected result reader/API on a single HTTP server (`POST /webhook` + `GET /health` + `POST /verify` + protected `GET /verification-jobs/:queueJobId/result`) with explicit start/stop lifecycle. It is in-memory, non-durable, single-process, with no retries, no horizontal workers, no persistent results, and no GitHub result writeback (no Checks, statuses, comments, reviews, or labels).
 
 ### Implemented
 
-| Capability                  | Status      | Detail                                                            |
-| --------------------------- | ----------- | ----------------------------------------------------------------- |
-| Domain model                | Implemented | Branded IDs, validation, immutability, entity model (~750+ lines) |
-| Verification pipeline       | Implemented | Detection, planning, execution, evidence, policy, result          |
-| GitHub webhook auth         | Implemented | HMAC-SHA256 with timing-safe comparison                           |
-| Replay protection           | Implemented | TTL-based reserve/commit/rollback                                 |
-| GitHub App auth             | Implemented | RS256 JWT, installation token acquisition                         |
-| Source snapshot acquisition | Implemented | Commit/tree/blob fetching at exact SHA                            |
-| Project detection           | Implemented | TypeScript/JavaScript and Rust/Soroban static detection           |
-| Check planning              | Implemented | Deterministic, content-hashed, dependency-ordered                 |
-| Check definitions           | Implemented | 11 definitions, 8 with executable specs                           |
-| Sandbox transport           | Implemented | Subprocess-based with bounded I/O, timeout, abort                 |
-| Evidence aggregation        | Implemented | Deterministic, content-hashed findings                            |
-| Policy evaluation           | Implemented | 5 deterministic rules, provider-independent                       |
-| VerificationResult          | Implemented | Immutable, content-hashed result assembly                         |
-| TypeScript E2E tests        | Implemented | 10 host-subprocess tests, 16 real sandbox tests                   |
-| Rust E2E tests              | Implemented | Host-subprocess E2E verification                                  |
-| Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                       |
-| API server                  | Implemented | HTTP health + verify + async result endpoints                     |
-| Worker boundary             | Implemented | Validates and delegates to application service                    |
+| Capability                  | Status      | Detail                                                             |
+| --------------------------- | ----------- | ------------------------------------------------------------------ |
+| Domain model                | Implemented | Branded IDs, validation, immutability, entity model (~750+ lines)  |
+| Verification pipeline       | Implemented | Detection, planning, execution, evidence, policy, result           |
+| GitHub webhook auth         | Implemented | HMAC-SHA256 with timing-safe comparison                            |
+| Replay protection           | Implemented | TTL-based reserve/commit/rollback                                  |
+| GitHub App auth             | Implemented | RS256 JWT, installation token acquisition                          |
+| Source snapshot acquisition | Implemented | Commit/tree/blob fetching at exact SHA                             |
+| Project detection           | Implemented | TypeScript/JavaScript and Rust/Soroban static detection            |
+| Check planning              | Implemented | Deterministic, content-hashed, dependency-ordered                  |
+| Check definitions           | Implemented | 11 definitions, 8 with executable specs                            |
+| Sandbox transport           | Implemented | Subprocess-based with bounded I/O, timeout, abort                  |
+| Evidence aggregation        | Implemented | Deterministic, content-hashed findings                             |
+| Policy evaluation           | Implemented | 5 deterministic rules, provider-independent                        |
+| VerificationResult          | Implemented | Immutable, content-hashed result assembly                          |
+| TypeScript E2E tests        | Implemented | 10 host-subprocess tests, 16 real sandbox tests                    |
+| Rust E2E tests              | Implemented | Host-subprocess E2E verification                                   |
+| Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                        |
+| API server                  | Implemented | HTTP health + verify + async result endpoints                      |
+| Worker boundary             | Implemented | Validates and delegates to application service                     |
+| GitHub verification service | Implemented | Single-process webhook → queue → auto runtime → result composition |
 
 ### Partial / conditional
 
-| Capability       | Status  | Blocker                                              |
-| ---------------- | ------- | ---------------------------------------------------- |
-| Secure execution | Partial | Requires external `verify-sandbox` process or Docker |
-| Worker loop      | Partial | No background polling, retry, or graceful shutdown   |
-| Queue durability | Partial | In-memory only; no Redis/SQS                         |
+| Capability       | Status  | Blocker                                                        |
+| ---------------- | ------- | -------------------------------------------------------------- |
+| Secure execution | Partial | Requires external `verify-sandbox` process or Docker           |
+| Worker loop      | Partial | In-process auto consumption only; no retry or graceful workers |
+| Queue durability | Partial | In-memory only; no Redis/SQS                                   |
 
 ### Not yet implemented
 
