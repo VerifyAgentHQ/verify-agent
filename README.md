@@ -42,26 +42,26 @@ The verification core is implemented and tested. The pipeline from webhook authe
 
 ### Implemented
 
-| Capability                  | Status      | Detail                                                             |
-| --------------------------- | ----------- | ------------------------------------------------------------------ |
-| Domain model                | Implemented | Branded IDs, validation, immutability, entity model (~750+ lines)  |
-| Verification pipeline       | Implemented | Detection, planning, execution, evidence, policy, result           |
-| GitHub webhook auth         | Implemented | HMAC-SHA256 with timing-safe comparison                            |
-| Replay protection           | Implemented | TTL-based reserve/commit/rollback                                  |
-| GitHub App auth             | Implemented | RS256 JWT, installation token acquisition                          |
-| Source snapshot acquisition | Implemented | Commit/tree/blob fetching at exact SHA                             |
-| Project detection           | Implemented | TypeScript/JavaScript and Rust/Soroban static detection            |
-| Check planning              | Implemented | Deterministic, content-hashed, dependency-ordered                  |
-| Check definitions           | Implemented | 11 definitions, 8 with executable specs                            |
-| Sandbox transport           | Implemented | Subprocess-based with bounded I/O, timeout, abort                  |
-| Evidence aggregation        | Implemented | Deterministic, content-hashed findings                             |
-| Policy evaluation           | Implemented | 5 deterministic rules, provider-independent                        |
-| VerificationResult          | Implemented | Immutable, content-hashed result assembly                          |
-| TypeScript E2E tests        | Implemented | 10 host-subprocess tests, 16 real sandbox tests                    |
-| Rust E2E tests              | Implemented | Host-subprocess E2E verification                                   |
-| Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                        |
-| API server                  | Implemented | HTTP health + verify + async result endpoints                      |
-| Worker boundary             | Implemented | Validates and delegates to application service                     |
+| Capability                  | Status      | Detail                                                                                                                                                                                                                       |
+| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain model                | Implemented | Branded IDs, validation, immutability, entity model (~750+ lines)                                                                                                                                                            |
+| Verification pipeline       | Implemented | Detection, planning, execution, evidence, policy, result                                                                                                                                                                     |
+| GitHub webhook auth         | Implemented | HMAC-SHA256 with timing-safe comparison                                                                                                                                                                                      |
+| Replay protection           | Implemented | TTL-based reserve/commit/rollback                                                                                                                                                                                            |
+| GitHub App auth             | Implemented | RS256 JWT, installation token acquisition                                                                                                                                                                                    |
+| Source snapshot acquisition | Implemented | Commit/tree/blob fetching at exact SHA                                                                                                                                                                                       |
+| Project detection           | Implemented | TypeScript/JavaScript and Rust/Soroban static detection                                                                                                                                                                      |
+| Check planning              | Implemented | Deterministic, content-hashed, dependency-ordered                                                                                                                                                                            |
+| Check definitions           | Implemented | 11 definitions, 8 with executable specs                                                                                                                                                                                      |
+| Sandbox transport           | Implemented | Subprocess-based with bounded I/O, timeout, abort                                                                                                                                                                            |
+| Evidence aggregation        | Implemented | Deterministic, content-hashed findings                                                                                                                                                                                       |
+| Policy evaluation           | Implemented | 5 deterministic rules, provider-independent                                                                                                                                                                                  |
+| VerificationResult          | Implemented | Immutable, content-hashed result assembly                                                                                                                                                                                    |
+| TypeScript E2E tests        | Implemented | 10 host-subprocess tests, 16 real sandbox tests                                                                                                                                                                              |
+| Rust E2E tests              | Implemented | Host-subprocess E2E verification                                                                                                                                                                                             |
+| Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                                                                                                                                                                                  |
+| API server                  | Implemented | HTTP health + verify + async result endpoints                                                                                                                                                                                |
+| Worker boundary             | Implemented | Validates and delegates to application service                                                                                                                                                                               |
 | GitHub verification service | Implemented | Single-process webhook → queue → auto runtime → result composition; GitHub-triggered jobs request deterministic applicable-check selection (`all-applicable`) resolved by detection → planner, never by a webhook check list |
 
 ### Partial / conditional
