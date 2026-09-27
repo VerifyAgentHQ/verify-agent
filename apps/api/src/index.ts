@@ -23,10 +23,15 @@ import {
   InvalidSourceReferenceError,
   type SourceResolver,
   createGitHubApiInstallationResolver,
+  createGitHubApiSourceProvider,
   createGitHubAppInstallationTokenClient,
   createGitHubAppSourceProvider,
   createGitHubSourceResolver,
+  createSnapshotStorePublisher,
   readGitHubAppConfig,
+  readGitHubToken,
+  readSnapshotStoreRoot,
+  selectGitHubSourceAuthKind,
 } from "@verify-agent/adapters-source";
 import type {
   PublicAsyncVerificationResponse,
@@ -347,7 +352,7 @@ export function createConfiguredApplicationService(): VerificationApplicationSer
   }
   const transport = new SubprocessSandboxTransport({
     executable,
-    environment: {},
+    environment: readSandboxProcessEnvironment(process.env),
     startupTimeoutMs: 5_000,
     requestTimeoutMs: 120_000,
     maxMessageBytes: 1_048_576,
@@ -365,6 +370,35 @@ export function createConfiguredApplicationService(): VerificationApplicationSer
   );
 }
 
+/**
+ * Batch 54 — minimal explicit environment for the external verify-sandbox
+ * process. The transport never inherits the host environment; only these
+ * established operator-configured keys are forwarded, and only when set.
+ * No credentials (GitHub tokens, webhook secrets, result tokens) are ever
+ * included: the sandbox materializes published snapshots and needs no
+ * acquisition credentials.
+ */
+const SANDBOX_PROCESS_ENV_KEYS = [
+  "VERIFY_SANDBOX_SNAPSHOT_ROOT",
+  "VERIFY_SANDBOX_DOCKER_EXECUTABLE",
+  "VERIFY_SANDBOX_DOCKER_HOST",
+  "VERIFY_SANDBOX_SYSTEM_ROOT",
+  "VERIFY_SANDBOX_TEMP_ROOT",
+] as const;
+
+export function readSandboxProcessEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const forwarded: Record<string, string> = {};
+  for (const key of SANDBOX_PROCESS_ENV_KEYS) {
+    const value = env[key];
+    if (typeof value === "string" && value.length > 0) {
+      forwarded[key] = value;
+    }
+  }
+  return forwarded;
+}
+
 function createDefaultSourceResolver(): SourceResolver {
   return {
     async resolveSnapshot(source) {
@@ -375,37 +409,63 @@ function createDefaultSourceResolver(): SourceResolver {
   };
 }
 
-function createConfiguredSourceResolver(): SourceResolver {
-  const env = process.env;
-  const appIdConfigured =
-    typeof env.GITHUB_APP_ID === "string" &&
-    env.GITHUB_APP_ID.trim().length > 0;
-  const privateKeyConfigured =
-    typeof env.GITHUB_APP_PRIVATE_KEY === "string" &&
-    env.GITHUB_APP_PRIVATE_KEY.trim().length > 0;
-  if (!appIdConfigured || !privateKeyConfigured) {
-    return createDefaultSourceResolver();
+/**
+ * Batch 54A — configured GitHub source authentication.
+ *
+ * - Complete GitHub App configuration → GitHub App provider (an ambient
+ *   `GITHUB_TOKEN` never overrides it).
+ * - Partial App configuration (exactly one of ID/key) → fail closed via
+ *   the default resolver; never a silent token fallback.
+ * - No App configuration → token provider only with the explicit
+ *   `GITHUB_SOURCE_AUTH_MODE=token` opt-in plus a `GITHUB_TOKEN`;
+ *   otherwise fail closed.
+ *
+ * Exported as a composition seam for focused configuration tests; normal
+ * startup uses `createConfiguredApplicationService()`.
+ */
+export function createConfiguredSourceResolver(
+  env: NodeJS.ProcessEnv = process.env,
+): SourceResolver {
+  const authKind = selectGitHubSourceAuthKind(env);
+  let base: SourceResolver;
+  if (authKind === "app") {
+    const appConfig = readGitHubAppConfig(env);
+    const apiBaseUrl =
+      typeof env.GITHUB_API_BASE_URL === "string" &&
+      env.GITHUB_API_BASE_URL.trim().length > 0
+        ? env.GITHUB_API_BASE_URL.trim()
+        : undefined;
+    const installationResolver = createGitHubApiInstallationResolver({
+      appConfig,
+      ...(apiBaseUrl ? { apiBaseUrl } : {}),
+    });
+    const installationTokenClient = createGitHubAppInstallationTokenClient({
+      appConfig,
+      ...(apiBaseUrl ? { apiBaseUrl } : {}),
+    });
+    const provider = createGitHubAppSourceProvider({
+      installationResolver,
+      installationTokenClient,
+      ...(apiBaseUrl ? { apiBaseUrl } : {}),
+    });
+    base = createGitHubSourceResolver(provider);
+  } else if (authKind === "token") {
+    const token = readGitHubToken(env);
+    base =
+      token === undefined
+        ? createDefaultSourceResolver()
+        : createGitHubSourceResolver(createGitHubApiSourceProvider({ token }));
+  } else {
+    base = createDefaultSourceResolver();
   }
-  const appConfig = readGitHubAppConfig(env);
-  const apiBaseUrl =
-    typeof env.GITHUB_API_BASE_URL === "string" &&
-    env.GITHUB_API_BASE_URL.trim().length > 0
-      ? env.GITHUB_API_BASE_URL.trim()
-      : undefined;
-  const installationResolver = createGitHubApiInstallationResolver({
-    appConfig,
-    ...(apiBaseUrl ? { apiBaseUrl } : {}),
-  });
-  const installationTokenClient = createGitHubAppInstallationTokenClient({
-    appConfig,
-    ...(apiBaseUrl ? { apiBaseUrl } : {}),
-  });
-  const provider = createGitHubAppSourceProvider({
-    installationResolver,
-    installationTokenClient,
-    ...(apiBaseUrl ? { apiBaseUrl } : {}),
-  });
-  return createGitHubSourceResolver(provider);
+  // Batch 54 — publish exact acquired bytes under the exact commit SHA so
+  // the external sandbox materializes precisely the verified revision.
+  // Without a configured store root the historical resolver behavior is
+  // preserved unchanged.
+  const snapshotStoreRoot = readSnapshotStoreRoot(env);
+  return snapshotStoreRoot === undefined
+    ? base
+    : createSnapshotStorePublisher(base, { snapshotStoreRoot });
 }
 
 /**

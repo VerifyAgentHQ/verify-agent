@@ -190,6 +190,9 @@ GitHub App JWT -> installation -> token
 Source snapshot at exact SHA
         |
         v
+SHA-keyed snapshot publication (exact bytes under <commit-SHA>)
+        |
+        v
 VerificationQueueJob
         |
         v

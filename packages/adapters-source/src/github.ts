@@ -67,6 +67,72 @@ export function encodeGitHubSnapshotReference(
   return `${reference.owner}:${reference.repository}:${reference.sha.toLowerCase()}`;
 }
 
+/**
+ * Batch 54 — controlled token configuration for the GitHub API source
+ * provider. Returns the trimmed `GITHUB_TOKEN` or `undefined` when absent.
+ * The token authenticates GitHub acquisition only and is never forwarded to
+ * the sandbox. It is selected only through the explicit token auth mode
+ * below, never as an ambient fallback.
+ */
+export function readGitHubToken(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const raw = env.GITHUB_TOKEN;
+  if (typeof raw !== "string" || raw.trim().length === 0) return undefined;
+  return raw.trim();
+}
+
+/**
+ * Batch 54A — explicit GitHub source authentication mode.
+ *
+ * - `"token"` (case-insensitive, surrounding whitespace ignored) opts in to
+ *   token-based acquisition for development/test setups without a full
+ *   GitHub App configuration.
+ * - Anything else (absent, blank, or any other value) means production
+ *   default: GitHub App when fully configured, fail closed otherwise.
+ */
+export function readGitHubSourceAuthMode(
+  env: NodeJS.ProcessEnv = process.env,
+): "token" | undefined {
+  const raw = env.GITHUB_SOURCE_AUTH_MODE;
+  if (typeof raw !== "string") return undefined;
+  return raw.trim().toLowerCase() === "token" ? "token" : undefined;
+}
+
+export type GitHubSourceAuthKind = "app" | "token" | "none";
+
+/**
+ * Batch 54A — selects the GitHub source authentication kind from
+ * configuration alone (no I/O, no secrets read beyond presence checks).
+ *
+ * - Complete App configuration (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`)
+ *   always selects `"app"`; an ambient token never overrides it.
+ * - Partial App configuration (exactly one of the two) selects `"none"`:
+ *   misconfiguration fails closed and never silently falls back to a token.
+ * - With no App configuration at all, `"token"` is selected only when the
+ *   explicit `GITHUB_SOURCE_AUTH_MODE=token` opt-in is present AND a
+ *   `GITHUB_TOKEN` exists; otherwise `"none"`.
+ */
+export function selectGitHubSourceAuthKind(
+  env: NodeJS.ProcessEnv = process.env,
+): GitHubSourceAuthKind {
+  const appIdConfigured =
+    typeof env.GITHUB_APP_ID === "string" &&
+    env.GITHUB_APP_ID.trim().length > 0;
+  const privateKeyConfigured =
+    typeof env.GITHUB_APP_PRIVATE_KEY === "string" &&
+    env.GITHUB_APP_PRIVATE_KEY.trim().length > 0;
+  if (appIdConfigured && privateKeyConfigured) return "app";
+  if (appIdConfigured || privateKeyConfigured) return "none";
+  if (
+    readGitHubSourceAuthMode(env) === "token" &&
+    readGitHubToken(env) !== undefined
+  ) {
+    return "token";
+  }
+  return "none";
+}
+
 export function decodeGitHubSnapshotReference(
   id: string,
 ): GitHubSnapshotReference {

@@ -15,6 +15,7 @@ export type {
   GitHubApiSourceProviderOptions,
   GitHubFixture,
   GitHubSnapshotReference,
+  GitHubSourceAuthKind,
   GitHubSourceProvider,
 } from "./github.js";
 export {
@@ -29,6 +30,9 @@ export {
   createSingleGitHubFixtureProvider,
   decodeGitHubSnapshotReference,
   encodeGitHubSnapshotReference,
+  readGitHubSourceAuthMode,
+  readGitHubToken,
+  selectGitHubSourceAuthKind,
   validateGitHubSnapshotReference,
 } from "./github.js";
 export type {
@@ -67,3 +71,10 @@ export {
   createGitHubAppSourceProvider,
   createStaticGitHubInstallationResolver,
 } from "./github-app.js";
+export type { SnapshotStorePublisherOptions } from "./snapshot-store-publisher.js";
+export {
+  SnapshotStorePublicationError,
+  createSnapshotStorePublisher,
+  deriveSnapshotStoreIdentity,
+  readSnapshotStoreRoot,
+} from "./snapshot-store-publisher.js";
