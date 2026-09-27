@@ -45,6 +45,7 @@ function freezeJob(job: VerificationQueueJob): VerificationQueueJob {
     trigger: Object.freeze({ ...job.trigger }),
     deliveryId: job.deliveryId,
     createdAt: job.createdAt,
+    ...(job.selection === undefined ? {} : { selection: job.selection }),
   });
 }
 

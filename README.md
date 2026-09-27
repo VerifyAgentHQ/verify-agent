@@ -62,7 +62,7 @@ The verification core is implemented and tested. The pipeline from webhook authe
 | Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                        |
 | API server                  | Implemented | HTTP health + verify + async result endpoints                      |
 | Worker boundary             | Implemented | Validates and delegates to application service                     |
-| GitHub verification service | Implemented | Single-process webhook → queue → auto runtime → result composition |
+| GitHub verification service | Implemented | Single-process webhook → queue → auto runtime → result composition; GitHub-triggered jobs request deterministic applicable-check selection (`all-applicable`) resolved by detection → planner, never by a webhook check list |
 
 ### Partial / conditional
 

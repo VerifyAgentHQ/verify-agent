@@ -7,12 +7,36 @@ export type VerificationQueueTrigger = {
   readonly pullRequestNumber: number;
 };
 
+/**
+ * Batch 53 — provider-neutral check-selection intent for a queue job.
+ *
+ * - `"default"` preserves the historical generic pipeline fallback (a single
+ *   default check) and is equivalent to omitting `selection`.
+ * - `"all-applicable"` requests every planner-applicable check that has a
+ *   trusted executable specification, in deterministic planner order.
+ *
+ * The job carries only intent. Project applicability stays authoritative in
+ * detection → planner; the queue never names concrete checks.
+ */
+export type VerificationCheckSelection = "default" | "all-applicable";
+
+export function isVerificationCheckSelection(
+  value: unknown,
+): value is VerificationCheckSelection {
+  return value === "default" || value === "all-applicable";
+}
+
 export interface VerificationQueueJob {
   readonly jobId: string;
   readonly source: SnapshotSourceReference;
   readonly trigger: VerificationQueueTrigger;
   readonly deliveryId: string;
   readonly createdAt: string;
+  /**
+   * Optional selection intent. Absent means `"default"` for backwards
+   * compatibility with jobs enqueued before Batch 53.
+   */
+  readonly selection?: VerificationCheckSelection;
 }
 
 export interface VerificationJobQueue {
@@ -126,6 +150,13 @@ export function validateVerificationQueueJob(
   }
 
   assertIsoDate(record.createdAt, "createdAt");
+
+  if (
+    record.selection !== undefined &&
+    !isVerificationCheckSelection(record.selection)
+  ) {
+    fail("job selection must be default or all-applicable");
+  }
 }
 
 export function createVerificationQueueJob(input: {
@@ -134,6 +165,7 @@ export function createVerificationQueueJob(input: {
   readonly trigger: VerificationQueueTrigger;
   readonly deliveryId: string;
   readonly createdAt: string;
+  readonly selection?: VerificationCheckSelection;
 }): VerificationQueueJob {
   validateVerificationQueueJob(input as unknown);
   return Object.freeze({
@@ -142,5 +174,6 @@ export function createVerificationQueueJob(input: {
     trigger: Object.freeze({ ...input.trigger }),
     deliveryId: input.deliveryId,
     createdAt: input.createdAt,
+    ...(input.selection === undefined ? {} : { selection: input.selection }),
   });
 }

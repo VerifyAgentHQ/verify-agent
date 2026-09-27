@@ -30,3 +30,7 @@ export type {
   CheckRuntime,
   TrustedExecutionSpecRegistry,
 } from "./execution-specs.js";
+export {
+  resolveCheckSelection,
+  selectApplicableExecutableChecks,
+} from "./selection.js";

@@ -4,6 +4,7 @@ import type {
   GeneratedArtifactRequirement,
   Project,
   RepositorySnapshot,
+  VerificationCheckSelection,
   VerificationJob,
   VerificationRequest,
   VerificationResult,
@@ -40,6 +41,12 @@ export interface VerifyRepositorySnapshotRequest {
   readonly verificationId: string;
   readonly plannerConfig?: PlannerConfig;
   readonly selectedCheckIds?: readonly CheckId[];
+  /**
+   * Batch 53 — selection intent forwarded to the pipeline. Explicit
+   * `selectedCheckIds` win when present; `"all-applicable"` requests the
+   * deterministic applicable executable plan. Absent preserves history.
+   */
+  readonly selection?: VerificationCheckSelection;
   readonly executionLimits?: ExecutionLimits;
   readonly dependencyProvisioning?: VerificationPipelineInput["dependencyProvisioning"];
   readonly generatedArtifactRequirements?: readonly GeneratedArtifactRequirement[];
@@ -50,6 +57,7 @@ export interface VerifySourceRequest {
   readonly source: SnapshotSourceReference;
   readonly plannerConfig?: PlannerConfig;
   readonly selectedCheckIds?: readonly CheckId[];
+  readonly selection?: VerificationCheckSelection;
   readonly executionLimits?: ExecutionLimits;
   readonly dependencyProvisioning?: VerifyRepositorySnapshotRequest["dependencyProvisioning"];
   readonly generatedArtifactRequirements?: readonly GeneratedArtifactRequirement[];
@@ -103,6 +111,7 @@ export class VerificationApplicationService {
       detectionContext: input.detectionContext,
       plannerConfig: input.plannerConfig,
       selectedCheckIds: input.selectedCheckIds,
+      selection: input.selection,
       executionLimits: input.executionLimits,
       jobId: input.job.id,
       executionId: `${input.job.id}-execution`,
@@ -237,6 +246,7 @@ export class VerificationApplicationService {
       verificationId,
       plannerConfig: input.plannerConfig,
       selectedCheckIds: input.selectedCheckIds,
+      selection: input.selection,
       executionLimits: input.executionLimits,
       dependencyProvisioning: input.dependencyProvisioning,
       generatedArtifactRequirements: input.generatedArtifactRequirements,

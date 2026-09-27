@@ -189,9 +189,13 @@ describe("Batch 48 — GitHub PR-to-Verification composition", () => {
     );
     // Delegation happened through the worker processor with the
     // provider-neutral queue source — the webhook never calls the service.
+    // Batch 53: the GitHub-enqueued job carries explicit all-applicable
+    // selection intent, which the worker translates into verifySource.
+    expect(run.composition.queue.jobs[0].selection).toBe("all-applicable");
     expect(run.verifySourceSpy).toHaveBeenCalledTimes(1);
     expect(run.verifySourceSpy).toHaveBeenCalledWith({
       source: run.composition.queue.jobs[0].source,
+      selection: "all-applicable",
     });
     expect(run.result).not.toBeNull();
   });

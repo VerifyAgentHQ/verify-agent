@@ -14,6 +14,7 @@ export function createVerificationJobProcessor(
     {
       verifySource(input: {
         readonly source: SnapshotSourceReference;
+        readonly selection?: VerificationQueueJob["selection"];
       }): Promise<VerificationResult>;
     },
     "verifySource"
@@ -28,7 +29,15 @@ export function createVerificationJobProcessor(
   return {
     async process(job: VerificationQueueJob): Promise<VerificationResult> {
       validateVerificationQueueJob(job);
-      return applicationService.verifySource({ source: job.source });
+      // Batch 53 — translate the queue job's provider-neutral selection
+      // intent into the application-service contract. Legacy jobs without
+      // `selection` keep the exact historical `{ source }` call shape.
+      return job.selection === undefined
+        ? applicationService.verifySource({ source: job.source })
+        : applicationService.verifySource({
+            source: job.source,
+            selection: job.selection,
+          });
     },
   };
 }

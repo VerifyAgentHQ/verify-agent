@@ -16,15 +16,20 @@
  *   ↓ service.stop() (runtime stopped, listener detached, server closed)
  * ```
  *
- * Honest service-selection note (derived from
- * `packages/engine/src/pipeline.ts`, NOT from sandbox behavior): when no
- * check selection is provided, the pipeline executes only
- * `typescript.typecheck`. The webhook path provides no selection, so the
- * service observes exactly the typecheck outcome for TypeScript fixtures:
- * healthy/failing-test/failing-build fixtures (all typecheck-clean)
- * yield `partial` with `typescript.typecheck` verified, while the
- * failing-typecheck fixture yields `blocked`. Check-selection plumbing
- * from queue job to service is follow-up work, not claimed here.
+ * Honest service-selection note (Batch 53, derived from
+ * `packages/engine/src/pipeline.ts`, NOT from sandbox behavior): the GitHub
+ * webhook path enqueues jobs with `selection: "all-applicable"`, so the
+ * pipeline executes every planner-applicable check that has a trusted
+ * executable specification, in deterministic planner order. For the
+ * TypeScript truth fixtures that means:
+ * - healthy / failing-test (tsconfig + vitest signal): `typescript.typecheck`
+ *   + `typescript.test`;
+ * - failing-typecheck (tsconfig only): `typescript.typecheck` alone;
+ * - failing-build (tsconfig + build script): `typescript.typecheck` +
+ *   `typescript.build` (dependency-ordered).
+ * Applicable checks without an executable specification (e.g.
+ * `dependency.audit`) are never executed. Check-selection plumbing from
+ * queue job to service is proven here, not follow-up work.
  *
  * Gate: VERIFY_SANDBOX_PROCESS, VERIFY_SANDBOX_SNAPSHOT_ROOT,
  * VERIFY_SANDBOX_DOCKER_EXECUTABLE, VERIFY_SANDBOX_DOCKER_HOST,
@@ -709,7 +714,7 @@ describe("Batch 52 — real-service sandbox configuration", () => {
 describe("Batch 52 — runnable service through the real sandbox", () => {
   it.skipIf(!sandboxAvailable)(
     sandboxAvailable
-      ? "healthy: webhook → service → real sandbox typecheck → verified result"
+      ? "healthy: webhook → service → real sandbox checks → verified result"
       : (skipReason as string),
     async () => {
       const scenario = SCENARIOS[0]!;
@@ -739,11 +744,14 @@ describe("Batch 52 — runnable service through the real sandbox", () => {
         expect(body.snapshotId).toContain(scenario.headSha);
         expect(body.verificationId).not.toBe(queueJobId);
         expect(body.jobId).not.toBe(queueJobId);
-        // Default service selection executes typescript.typecheck for
-        // real; nothing else was selected, so the remaining applicable
-        // checks stay partial and the honest status is partial.
+        // Batch 53 all-applicable selection: the healthy fixture exposes a
+        // tsconfig + vitest signal, so both typecheck and test execute for
+        // real; checks without an executable spec are never selected, so
+        // the honest status remains partial rather than pass.
         expect(body.status).not.toBe("blocked");
         expect(body.coverage.verified).toContain("typescript.typecheck");
+        expect(body.coverage.verified).toContain("typescript.test");
+        expect(body.coverage.verified).not.toContain("dependency.audit");
         expect(body.findings).toHaveLength(0);
         expect(body.contentHash).toMatch(/^[0-9a-f]{64}$/);
         expect(body.resultVersion).toBe("1.0.0");
@@ -789,13 +797,13 @@ describe("Batch 52 — runnable service through the real sandbox", () => {
 
   it.skipIf(!sandboxAvailable)(
     sandboxAvailable
-      ? "failing-test: default selection observes only the passing typecheck"
+      ? "failing-test: all-applicable selection executes typecheck and the failing test"
       : (skipReason as string),
     async () => {
-      // The webhook path provides no check selection, so the pipeline
-      // default (typescript.typecheck) applies. The failing test itself
-      // never executes here; the honest result is the genuinely observed
-      // passing typecheck. Full-plan selection plumbing is follow-up work.
+      // Batch 53: the webhook job carries `selection: "all-applicable"`,
+      // so the fixture's applicable executable checks (typecheck + test)
+      // both execute for real. The typecheck passes, the test fails, and
+      // the deterministic policy blocks the verification.
       const scenario = SCENARIOS[1]!;
       const snapshotRoot = process.env.VERIFY_SANDBOX_SNAPSHOT_ROOT!;
       const dest = await provisionCleanSnapshot(scenario, snapshotRoot);
@@ -818,10 +826,12 @@ describe("Batch 52 — runnable service through the real sandbox", () => {
 
         const body = await fetchRealResult(port, queueJobId);
         expect(body.snapshotId).toBe(expectedSnapshotId(scenario.headSha));
-        expect(body.status).not.toBe("blocked");
+        // The genuinely executed test failed in the sandbox, so the
+        // deterministic policy blocks the verification.
+        expect(body.status).toBe("blocked");
         expect(body.coverage.verified).toContain("typescript.typecheck");
         expect(body.coverage.verified).not.toContain("typescript.test");
-        expect(body.findings).toHaveLength(0);
+        expect(body.findings.length).toBeGreaterThanOrEqual(1);
       } finally {
         await service.stop();
         await rm(dest, { recursive: true, force: true }).catch(() => {});
@@ -873,13 +883,14 @@ describe("Batch 52 — runnable service through the real sandbox", () => {
 
   it.skipIf(!sandboxAvailable)(
     sandboxAvailable
-      ? "failing-build: default selection observes only the passing typecheck"
+      ? "failing-build: all-applicable selection executes typecheck and the failing build"
       : (skipReason as string),
     async () => {
-      // Same default-selection honesty as the failing-test case: the
-      // fixture's typecheck passes (build-only failure by design), the
-      // build never executes through this path, and the observed result
-      // is the genuinely executed passing typecheck.
+      // Batch 53: the webhook job carries `selection: "all-applicable"`,
+      // so the fixture's applicable executable checks (typecheck + build,
+      // dependency-ordered) both execute for real. The fixture is a
+      // build-only failure by design: typecheck passes, the build fails,
+      // and the deterministic policy blocks the verification.
       const scenario = SCENARIOS[3]!;
       const snapshotRoot = process.env.VERIFY_SANDBOX_SNAPSHOT_ROOT!;
       const dest = await provisionCleanSnapshot(scenario, snapshotRoot);
@@ -902,10 +913,12 @@ describe("Batch 52 — runnable service through the real sandbox", () => {
 
         const body = await fetchRealResult(port, queueJobId);
         expect(body.snapshotId).toBe(expectedSnapshotId(scenario.headSha));
-        expect(body.status).not.toBe("blocked");
+        // The genuinely executed build failed in the sandbox, so the
+        // deterministic policy blocks the verification.
+        expect(body.status).toBe("blocked");
         expect(body.coverage.verified).toContain("typescript.typecheck");
         expect(body.coverage.verified).not.toContain("typescript.build");
-        expect(body.findings).toHaveLength(0);
+        expect(body.findings.length).toBeGreaterThanOrEqual(1);
       } finally {
         await service.stop();
         await rm(dest, { recursive: true, force: true }).catch(() => {});

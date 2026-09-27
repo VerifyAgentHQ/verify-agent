@@ -71,6 +71,11 @@ export function createGitHubVerificationOrchestrator(
         },
         deliveryId,
         createdAt,
+        // Batch 53 — GitHub PR verification requests the deterministic
+        // applicable executable plan. No check list lives here: project
+        // applicability stays authoritative in detection → planner, and the
+        // worker translates this provider-neutral intent for the pipeline.
+        selection: "all-applicable",
       });
 
       await queue.enqueue(job);

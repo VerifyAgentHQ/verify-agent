@@ -8,12 +8,16 @@ import type {
   Project,
   ProjectProfile,
   RepositorySnapshot,
+  VerificationCheckSelection,
 } from "@verify-agent/domain";
 import {
   createCheckDefinitionRegistry,
   createCheckPlanner,
+  createTrustedExecutionSpecRegistry,
+  resolveCheckSelection,
   type CheckPlanner,
   type PlannerConfig,
+  type TrustedExecutionSpecRegistry,
 } from "@verify-agent/checks";
 import type {
   DetectionContext,
@@ -49,6 +53,14 @@ export interface VerificationPipelineInput {
   readonly selectedCheckId?: CheckId;
   /** Optional deterministic subset; items retain CheckPlan order. */
   readonly selectedCheckIds?: readonly CheckId[];
+  /**
+   * Batch 53 — provider-neutral selection intent. Explicit
+   * `selectedCheckId`/`selectedCheckIds` win when present; `"all-applicable"`
+   * selects every planner-applicable check with a trusted executable spec in
+   * planner order. Absent (or `"default"`) preserves the historical generic
+   * fallback below.
+   */
+  readonly selection?: VerificationCheckSelection;
   readonly executionLimits?: ExecutionLimits;
   readonly jobId: string;
   readonly executionId: string;
@@ -136,6 +148,7 @@ export interface VerificationPipelineDependencies {
   readonly detector: ProjectDetectionPort;
   readonly planner?: CheckPlanner;
   readonly executor: CheckExecutor;
+  readonly specRegistry?: TrustedExecutionSpecRegistry;
   readonly dependencyProvisioner?: DependencyProvisioningPort;
   readonly generatedArtifactPreparer?: GeneratedArtifactPreparer;
 }
@@ -145,6 +158,8 @@ export function createVerificationPipeline(
 ): VerificationPipeline {
   const planner = dependencies.planner ?? createCheckPlanner();
   const definitions = createCheckDefinitionRegistry();
+  const specRegistry =
+    dependencies.specRegistry ?? createTrustedExecutionSpecRegistry();
   return {
     async verify(input): Promise<VerificationPipelineOutput> {
       let detected: ProjectDetectionResult;
@@ -162,7 +177,17 @@ export function createVerificationPipeline(
         );
       }
       const plan = planner.plan(detected.profile, input.plannerConfig);
-      const selectedCheckIds = input.selectedCheckIds ?? [
+      const resolvedSelection = resolveCheckSelection({
+        plan,
+        selection: input.selection,
+        selectedCheckIds: input.selectedCheckIds,
+        ...(input.selectedCheckId === undefined
+          ? {}
+          : { selectedCheckId: input.selectedCheckId }),
+        hasExecutableSpec: (checkId) =>
+          specRegistry.find(checkId) !== undefined,
+      });
+      const selectedCheckIds = resolvedSelection ?? [
         input.selectedCheckId ?? brandId<"CheckId">("typescript.typecheck"),
       ];
       if (selectedCheckIds.length === 0) {
