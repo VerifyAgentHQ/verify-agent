@@ -25,6 +25,15 @@ import {
   type VerificationResultRegistry,
 } from "@verify-agent/worker";
 import {
+  createGitHubApiInstallationResolver,
+  createGitHubAppInstallationTokenClient,
+  createGitHubCheckPublisher,
+  createGitHubRepositorySnapshot,
+  decodeGitHubSnapshotReference,
+  readGitHubAppConfig,
+  type GitHubCheckPublisher,
+} from "@verify-agent/adapters-source";
+import {
   createConfiguredApplicationService,
   createVerificationRequestListener,
   readInternalResultToken,
@@ -58,6 +67,23 @@ import { readGitHubWebhookSecret } from "@verify-agent/github-bot";
  *   runtime usable. No retries, no dead-letter queues.
  * - Nothing secret is logged; no logging framework is introduced.
  * - Sequential in-process execution; no parallel workers.
+ *
+ * Batch 55A — when `checkPublisher` is provided, the service additionally
+ * owns production Check publication:
+ *
+ * ```text
+ * GitHub PR webhook → queued verification → VerificationResult settled
+ *   → GitHubCheckPublisher automatically invoked (exact SHA, monotonic)
+ * ```
+ *
+ * - Exactly one publisher subscription while started; none while stopped.
+ * - Publication failures never mutate VerificationResult or the registry.
+ *
+ * Batch 55B — `startConfiguredGitHubVerificationService` constructs that
+ * publisher from GitHub App configuration (`GITHUB_APP_ID` +
+ * `GITHUB_APP_PRIVATE_KEY`, fail-closed) via
+ * `createConfiguredGitHubCheckPublisher`, so the normal configured
+ * startup publishes without any caller-supplied publisher.
  */
 
 export interface GitHubVerificationServiceDependencies {
@@ -73,6 +99,17 @@ export interface GitHubVerificationServiceDependencies {
   readonly maxResults?: number;
   readonly createJobId?: () => string;
   readonly now?: () => string;
+  /**
+   * Batch 55A — production GitHub Check publisher owned by the running
+   * service. When present, the service subscribes exactly once on `start`
+   * and unsubscribes on `stop`/`close`, translating each completed
+   * `VerificationResult` into a Check Run for the exact verified commit.
+   * Publication failures never mutate verification truth.
+   */
+  readonly checkPublisher?: Pick<
+    GitHubCheckPublisher,
+    "publishVerificationResult"
+  > | null;
 }
 
 export interface GitHubVerificationService {
@@ -219,6 +256,102 @@ export function createGitHubVerificationService(
   // No caller is required to drive `processNext()` manually for the
   // composed service to work.
 
+  // Batch 55A — lifecycle-owned Check publisher subscription. Exactly one
+  // active subscription while started; none while stopped. Uses the same
+  // single-flight start/stop transitions as the runtime (no second
+  // runtime, no queue, no event-bus framework).
+  const checkPublisher = dependencies?.checkPublisher ?? null;
+  let checkPublisherUnsubscribe: (() => void) | null = null;
+
+  function toCheckPublication(outcome: VerificationJobSettledOutcome): {
+    readonly result: VerificationJobSettledOutcome extends never
+      ? never
+      : import("@verify-agent/domain").VerificationResult;
+    readonly snapshot: import("@verify-agent/domain").RepositorySnapshot;
+    readonly repository: { readonly owner: string; readonly name: string };
+    readonly pullRequestNumber: number | undefined;
+    readonly expectedHeadSha: string;
+  } | null {
+    if (outcome.kind !== "completed") return null;
+    let reference: {
+      readonly owner: string;
+      readonly repository: string;
+      readonly sha: string;
+    };
+    try {
+      reference = decodeGitHubSnapshotReference(outcome.job.source.id);
+    } catch {
+      return null;
+    }
+    let snapshot: import("@verify-agent/domain").RepositorySnapshot;
+    try {
+      snapshot = createGitHubRepositorySnapshot({
+        kind: "github-snapshot",
+        owner: reference.owner,
+        repository: reference.repository,
+        sha: reference.sha,
+      });
+    } catch {
+      return null;
+    }
+    const trigger = outcome.job.trigger as
+      | { readonly kind?: unknown; readonly pullRequestNumber?: unknown }
+      | undefined;
+    const pullRequestNumber =
+      typeof trigger?.pullRequestNumber === "number" &&
+      Number.isInteger(trigger.pullRequestNumber) &&
+      (trigger.pullRequestNumber as number) > 0
+        ? (trigger.pullRequestNumber as number)
+        : undefined;
+    return {
+      result: outcome.result,
+      snapshot,
+      repository: { owner: reference.owner, name: reference.repository },
+      pullRequestNumber,
+      expectedHeadSha: reference.sha.toLowerCase(),
+    };
+  }
+
+  function handleSettledForChecks(
+    outcome: VerificationJobSettledOutcome,
+  ): void {
+    if (!checkPublisher) return;
+    const derived = toCheckPublication(outcome);
+    if (!derived) return;
+    // Publication failure must never corrupt verification truth:
+    // no registry mutation, no result mutation, no retries, no secret
+    // logging. The publisher already fails closed before network on
+    // identity mismatches.
+    void checkPublisher
+      .publishVerificationResult({
+        result: derived.result,
+        snapshot: derived.snapshot,
+        repository: derived.repository,
+        ...(derived.pullRequestNumber === undefined
+          ? {}
+          : { pullRequestNumber: derived.pullRequestNumber }),
+        expectedHeadSha: derived.expectedHeadSha,
+      })
+      .catch(() => {});
+  }
+
+  function attachCheckPublisher(): void {
+    if (!checkPublisher) return;
+    if (checkPublisherUnsubscribe !== null) return;
+    checkPublisherUnsubscribe = runtime.onSettled(handleSettledForChecks);
+  }
+
+  function detachCheckPublisher(): void {
+    if (checkPublisherUnsubscribe !== null) {
+      try {
+        checkPublisherUnsubscribe();
+      } catch {
+        // Unsubscribe must never break shutdown.
+      }
+      checkPublisherUnsubscribe = null;
+    }
+  }
+
   return {
     queue,
     runtime,
@@ -249,6 +382,7 @@ export function createGitHubVerificationService(
         listenHost = host;
         accepting = true;
         runtime.startAutoProcessing();
+        attachCheckPublisher();
         try {
           await new Promise<void>((resolve, reject) => {
             server.once("error", reject);
@@ -260,8 +394,10 @@ export function createGitHubVerificationService(
         } catch (error) {
           // Transactional startup: a failed bind must leave no background
           // work behind. Stop the runtime, detach the queue wakeup
-          // listener, reset lifecycle state, close any partially opened
-          // server resource, and rethrow the original bind error.
+          // listener AND the Check publisher callback, reset lifecycle
+          // state, close any partially opened server resource, and rethrow
+          // the original bind error.
+          detachCheckPublisher();
           accepting = false;
           started = false;
           try {
@@ -307,6 +443,7 @@ export function createGitHubVerificationService(
           }
         }
         accepting = false;
+        detachCheckPublisher();
         await runtime.stopAutoProcessing();
         runtime.stop();
         started = false;
@@ -344,6 +481,7 @@ export function createGitHubVerificationService(
           }
         }
         accepting = false;
+        detachCheckPublisher();
         await runtime.stopAutoProcessing();
         runtime.stop();
         started = false;
@@ -388,6 +526,68 @@ function readConfiguredPort(env: NodeJS.ProcessEnv): number {
   return port;
 }
 
+function readConfiguredApiBaseUrl(env: NodeJS.ProcessEnv): string | undefined {
+  const raw = env.GITHUB_API_BASE_URL;
+  if (typeof raw !== "string" || raw.trim().length === 0) return undefined;
+  return raw.trim();
+}
+
+/**
+ * Batch 55B — configured GitHub Check publisher construction.
+ *
+ * Reuses the existing GitHub App authentication infrastructure (no second
+ * JWT/token implementation, no `GITHUB_TOKEN`, no Batch 54A token mode):
+ * `readGitHubAppConfig` → `createGitHubApiInstallationResolver` →
+ * `createGitHubAppInstallationTokenClient` → `createGitHubCheckPublisher`.
+ *
+ * Fail-closed: absent/incomplete App configuration throws the existing
+ * `GitHubAppConfigurationError` (diagnosable, no secrets) before any
+ * network access; no publisher is fabricated and no token fallback occurs.
+ */
+export function createConfiguredGitHubCheckPublisher(
+  env: NodeJS.ProcessEnv = process.env,
+  overrides?: { readonly fetch?: typeof globalThis.fetch },
+): GitHubCheckPublisher {
+  const appConfig = readGitHubAppConfig(env);
+  const apiBaseUrl = readConfiguredApiBaseUrl(env);
+  const fetch = overrides?.fetch ?? globalThis.fetch;
+  const installationResolver = createGitHubApiInstallationResolver({
+    appConfig,
+    ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),
+    ...(fetch === undefined ? {} : { fetch }),
+  });
+  const installationTokenClient = createGitHubAppInstallationTokenClient({
+    appConfig,
+    ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),
+    ...(fetch === undefined ? {} : { fetch }),
+  });
+  return createGitHubCheckPublisher({
+    appConfig,
+    installationResolver,
+    installationTokenClient,
+    ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),
+    ...(fetch === undefined ? {} : { fetch }),
+  });
+}
+
+export interface ConfiguredGitHubVerificationServiceOptions {
+  readonly port?: number;
+  readonly host?: string;
+  /**
+   * Batch 55B — composition seams for tests. Production calls with no
+   * overrides: webhook secret/result token/port from `env` (default
+   * `process.env`), sandbox-backed application service, global fetch.
+   * Tests substitute a fake application service and/or stub fetch while
+   * still exercising the configured publisher construction path.
+   */
+  readonly env?: NodeJS.ProcessEnv;
+  readonly applicationService?: Pick<
+    VerificationApplicationServiceType,
+    "verifySource"
+  >;
+  readonly fetch?: typeof globalThis.fetch;
+}
+
 /**
  * Normal configured startup for the Batch 51 single-process service.
  *
@@ -397,19 +597,33 @@ function readConfiguredPort(env: NodeJS.ProcessEnv): number {
  * GitHub App credentials where already supported, and the sandbox
  * transport configuration (`VERIFY_SANDBOX_PROCESS`). No second
  * configuration system, no hardcoded secrets, no secret exposure.
+ *
+ * Batch 55B — additionally constructs the GitHub App-authenticated Check
+ * publisher from the same environment and wires it as the service's
+ * single lifecycle-owned settled-result subscription, so real
+ * webhook-triggered verification publishes a Check Run without any
+ * caller-supplied publisher. Missing/incomplete App configuration fails
+ * closed (no `GITHUB_TOKEN` fallback, no fabricated publisher).
  */
 export async function startConfiguredGitHubVerificationService(
-  options: { readonly port?: number; readonly host?: string } = {},
+  options: ConfiguredGitHubVerificationServiceOptions = {},
 ): Promise<GitHubVerificationService> {
-  const secret = readGitHubWebhookSecret(process.env);
-  const internalResultToken = readInternalResultToken(process.env);
-  const applicationService = createConfiguredApplicationService();
+  const env = options.env ?? process.env;
+  const secret = readGitHubWebhookSecret(env);
+  const internalResultToken = readInternalResultToken(env);
+  const applicationService =
+    options.applicationService ?? createConfiguredApplicationService();
+  const checkPublisher = createConfiguredGitHubCheckPublisher(
+    env,
+    options.fetch === undefined ? undefined : { fetch: options.fetch },
+  );
   const service = createGitHubVerificationService({
     applicationService,
     secret,
     ...(internalResultToken === null ? {} : { internalResultToken }),
+    checkPublisher,
   });
-  const port = options.port ?? readConfiguredPort(process.env);
+  const port = options.port ?? readConfiguredPort(env);
   const host = options.host ?? "0.0.0.0";
   await service.start(port, host);
   return service;

@@ -217,6 +217,15 @@ Policy evaluation (5 deterministic rules)
         |
         v
 VerificationResult (immutable, content-hashed)
+        |
+        v
+GitHub Check Run (Batch 55/55A/55B/55C/55D: configured startup constructs the
+App-authenticated publisher and wires one lifecycle-owned subscription;
+result mirrored to the exact commit via the GitHub App with checks:write;
+SHA-bound, only App-owned runs trusted/updated, monotonic/stale-safe via a
+versioned external_id freshness marker that survives LRU eviction and
+restarts (serialization stays process-local); verification truth stays in
+VerifyAgent)
 ```
 
 ## Supported ecosystems
