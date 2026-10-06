@@ -106,17 +106,22 @@ Implementation commit: `3c42309`.
 
 ### Phase 5 — Expand deterministic requirement rules
 
-Goal:
+DONE.
 
-**Add a small number of deterministic requirement rules that produce concrete evidence.**
+- Implemented `required-file-changed`.
+- PASS when the explicitly requested file is in the changed-file set.
+- FAIL when the requested file is absent.
+- UNKNOWN when the required path cannot be extracted.
+- Preserved provenance, evidence hash, changed-file evidence, durable persistence, and comment rendering.
+- Added focused PASS, FAIL, persistence, verdict, and comment tests.
+- Positive dogfood: `StellarForgeDev/stellar-forge#13`.
+- Negative fixture: `StellarForgeDev/stellar-forge#14`.
 
-Immediate next action:
-
-Implement and test `required-file-changed` as the first Phase 5 rule.
-
-Do NOT start Phase 6 until Phase 5 has a real dogfood proof.
+Implementation commits: `348e3ea`, `42cc30b`, `9070dfe`.
 
 ## Future phases
+
+## CURRENT PHASE
 
 ### Phase 6 — Better requirement extraction
 
@@ -171,4 +176,4 @@ Phase 3 is complete only when the coherent Phase 0–2 implementation and this r
 
 ## CURRENT ACTION
 
-Execute Phase 5 only after reviewing this roadmap. Do not revive sandbox execution or expand the contract repository.
+Execute Phase 6 only after reviewing this roadmap. Do not revive sandbox execution or expand the contract repository.
