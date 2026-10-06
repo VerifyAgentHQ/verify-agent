@@ -29,25 +29,25 @@ The custom sandbox is frozen and is NOT part of the active MVP.
 
 DONE.
 
-* Removed historical batch suites.
-* Removed obsolete sandbox/engine/pipeline/CLI tests.
-* Removed obsolete host CLI.
-* Removed stale artifacts/debug/credential-bearing local launch material.
-* Removed legacy Check Run publisher from active runtime.
-* Preserved sandbox/engine/contract repositories as frozen source.
-* Updated architecture documentation.
+- Removed historical batch suites.
+- Removed obsolete sandbox/engine/pipeline/CLI tests.
+- Removed obsolete host CLI.
+- Removed stale artifacts/debug/credential-bearing local launch material.
+- Removed legacy Check Run publisher from active runtime.
+- Preserved sandbox/engine/contract repositories as frozen source.
+- Updated architecture documentation.
 
 ### Phase 1 — Working MVP runtime
 
 DONE.
 
-* GitHub App authentication.
-* Webhook/queue/worker.
-* PR/issue/diff/check-run retrieval.
-* Deterministic MVP verdict.
-* Durable result registry.
-* Stable VerifyAgent PR comment create/update.
-* MVP decoupled from sandbox execution.
+- GitHub App authentication.
+- Webhook/queue/worker.
+- PR/issue/diff/check-run retrieval.
+- Deterministic MVP verdict.
+- Durable result registry.
+- Stable VerifyAgent PR comment create/update.
+- MVP decoupled from sandbox execution.
 
 Proof:
 
@@ -57,23 +57,23 @@ Proof:
 
 DONE.
 
-* RequirementEvidence model.
-* PR/issue provenance.
-* Compound PR #11 requirement split into two requirements.
-* `github-action-pinned`.
-* `checkout-persist-credentials-disabled`.
-* PASS / FAIL / UNKNOWN.
-* UNKNOWN blocks the merge-oriented verdict.
-* Evidence persistence.
-* Evidence-based comment rendering.
-* PR #11 dogfood with real evidence.
+- RequirementEvidence model.
+- PR/issue provenance.
+- Compound PR #11 requirement split into two requirements.
+- `github-action-pinned`.
+- `checkout-persist-credentials-disabled`.
+- PASS / FAIL / UNKNOWN.
+- UNKNOWN blocks the merge-oriented verdict.
+- Evidence persistence.
+- Evidence-based comment rendering.
+- PR #11 dogfood with real evidence.
 
 PR #11 proof:
 
 `.github/workflows/ci.yml`
 
-* 6 changed action references verified against full commit SHAs.
-* 2 checkout steps verified with `persist-credentials: false`.
+- 6 changed action references verified against full commit SHAs.
+- 2 checkout steps verified with `persist-credentials: false`.
 
 ## CURRENT PHASE
 
@@ -149,15 +149,15 @@ Phase 3 is complete only when the coherent Phase 0–2 implementation and this r
 
 ## Architectural decisions
 
-* GitHub Actions is authoritative for CI execution.
-* Deterministic evidence is authoritative for requirement verdicts.
-* The sandbox and related repositories remain frozen source.
-* One stable marker identifies the VerifyAgent PR comment.
-* Durable result storage preserves the detailed MVP result and requirement evidence.
+- GitHub Actions is authoritative for CI execution.
+- Deterministic evidence is authoritative for requirement verdicts.
+- The sandbox and related repositories remain frozen source.
+- One stable marker identifies the VerifyAgent PR comment.
+- Durable result storage preserves the detailed MVP result and requirement evidence.
 
 ## Dogfood proof cases
 
-* `StellarForgeDev/stellar-forge#11`: PASS with six pinned action references and two disabled checkout credential settings.
+- `StellarForgeDev/stellar-forge#11`: PASS with six pinned action references and two disabled checkout credential settings.
 
 ## CURRENT ACTION
 
