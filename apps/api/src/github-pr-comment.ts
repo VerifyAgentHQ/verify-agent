@@ -74,11 +74,19 @@ function renderRequirementEvidence(
       const rule =
         item.rule === "github-action-pinned"
           ? "every relevant `uses:` reference is pinned to a full commit SHA"
-          : "`actions/checkout` sets `persist-credentials: false`";
+          : item.rule === "checkout-persist-credentials-disabled"
+            ? "`actions/checkout` sets `persist-credentials: false`"
+            : "the required file appears in the changed-file set";
       lines.push(`Rule: ${rule}`);
       if (item.observedText.length > 0)
         lines.push(
-          `Verified: ${item.observedText.length} ${item.rule === "github-action-pinned" ? "action references" : "checkout steps"}`,
+          `Verified: ${item.observedText.length} ${
+            item.rule === "github-action-pinned"
+              ? "action references"
+              : item.rule === "checkout-persist-credentials-disabled"
+                ? "checkout steps"
+                : "required file(s)"
+          }`,
         );
     }
     return [...lines, ""];

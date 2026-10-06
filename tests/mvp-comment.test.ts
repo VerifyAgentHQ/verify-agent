@@ -114,4 +114,26 @@ describe("MVP comment composition", () => {
       "Evidence: `.github/workflows/ci.yml (patch @@ -1,1 +13,1 @@)`",
     );
   });
+
+  it("renders required-file evidence with its own rule", () => {
+    const evidence = evaluatePullRequestRequirements({
+      description: "Add `docs/verifyagent-phase5.md`.",
+      changedFiles: ["docs/verifyagent-phase5.md"],
+      patches: { "docs/verifyagent-phase5.md": "@@ -0,0 +1 @@\n+# Phase 5" },
+    })[0]?.evidence;
+    const body = renderMvpComment({
+      commitSha: "e".repeat(40),
+      resultId: "mvp-result-5",
+      policyId: "mvp-policy-5",
+      verdict: "pass",
+      checks: ["✅ Typecheck"],
+      requirements: [],
+      findings: [],
+      evidence: evidence ? [evidence] : [],
+    });
+    expect(body).toContain(
+      "Rule: the required file appears in the changed-file set",
+    );
+    expect(body).not.toContain("persist-credentials");
+  });
 });
