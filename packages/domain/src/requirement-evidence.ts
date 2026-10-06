@@ -18,6 +18,7 @@ export type RequirementEvidenceStatus = "passed" | "failed" | "unknown";
 export type RequirementEvidenceLocation = {
   readonly file: string;
   readonly patchHunk?: string;
+  readonly side?: "LEFT" | "RIGHT";
   readonly startLine?: number;
   readonly endLine?: number;
 };

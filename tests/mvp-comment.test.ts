@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderMvpComment } from "../apps/api/src/github-pr-comment.js";
+import { evaluatePullRequestRequirements } from "../apps/api/src/pr-requirements.js";
 
 describe("MVP comment composition", () => {
   it("does not render legacy sandbox check failures in an MVP PASS", () => {
@@ -71,5 +72,46 @@ describe("MVP comment composition", () => {
     expect(body).toContain("- No test file was changed.");
     expect(body).not.toContain("typescript.test");
     expect(body).not.toContain("legacy-finding");
+  });
+
+  it("renders precise evidence locations and patch fallback", () => {
+    const evidence = evaluatePullRequestRequirements({
+      description: "Pin CI actions to immutable commits.",
+      changedFiles: [".github/workflows/ci.yml"],
+      patches: {
+        ".github/workflows/ci.yml":
+          "@@ -1,1 +13,1 @@\n+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      },
+    })[0]?.evidence;
+    expect(evidence?.locations[0]).toMatchObject({
+      file: ".github/workflows/ci.yml",
+      startLine: 13,
+      endLine: 13,
+      side: "RIGHT",
+    });
+
+    const fallback = renderMvpComment({
+      commitSha: "d".repeat(40),
+      resultId: "mvp-result-4",
+      policyId: "mvp-policy-4",
+      verdict: "blocked",
+      checks: ["⚠️ CI"],
+      requirements: [],
+      findings: ["Evidence unavailable."],
+      evidence: [
+        {
+          ...evidence!,
+          locations: [
+            {
+              file: ".github/workflows/ci.yml",
+              patchHunk: "@@ -1,1 +13,1 @@",
+            },
+          ],
+        },
+      ],
+    });
+    expect(fallback).toContain(
+      "Evidence: `.github/workflows/ci.yml (patch @@ -1,1 +13,1 @@)`",
+    );
   });
 });

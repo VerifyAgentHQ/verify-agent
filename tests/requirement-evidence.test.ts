@@ -57,11 +57,29 @@ describe("Requirement Evidence milestone", () => {
     expect(result.map((item) => item.status)).toEqual(["passed", "passed"]);
     expect(result[0]?.evidence?.rule).toBe("github-action-pinned");
     expect(result[0]?.evidence?.observedText.length).toBe(2);
+    expect(
+      result[0]?.evidence?.locations.map((location) => [
+        location.startLine,
+        location.side,
+      ]),
+    ).toEqual([
+      [13, "RIGHT"],
+      [15, "RIGHT"],
+    ]);
     expect(result[1]?.evidence?.rule).toBe(
       "checkout-persist-credentials-disabled",
     );
     expect(result[1]?.evidence?.observedText).toEqual([
       "persist-credentials: false",
+    ]);
+    expect(
+      result[1]?.evidence?.locations.map((location) => [
+        location.startLine,
+        location.side,
+      ]),
+    ).toEqual([
+      [13, "RIGHT"],
+      [14, "RIGHT"],
     ]);
   });
 

@@ -37,6 +37,27 @@ export interface MvpCommentInput {
 function renderRequirementEvidence(
   evidence: readonly RequirementEvidence[],
 ): string[] {
+  const renderLocations = (item: RequirementEvidence): string => {
+    const locations = item.locations
+      .map((location) => {
+        const line =
+          location.startLine === undefined
+            ? location.patchHunk === undefined
+              ? ""
+              : ` (patch ${location.patchHunk})`
+            : `:${location.startLine}${
+                location.endLine !== undefined &&
+                location.endLine !== location.startLine
+                  ? `-${location.endLine}`
+                  : ""
+              }${location.side === undefined ? "" : ` (${location.side})`}`;
+        return `\`${location.file}${line}\``;
+      })
+      .filter((location, index, all) => all.indexOf(location) === index)
+      .slice(0, 10);
+    if (locations.length > 0) return locations.join(", ");
+    return item.matchedFiles.map((file) => `\`${file}\``).join(", ");
+  };
   return evidence.flatMap((item) => {
     const icon =
       item.status === "passed" ? "✅" : item.status === "failed" ? "❌" : "⚠️";
@@ -45,9 +66,7 @@ function renderRequirementEvidence(
       lines.push(`Evidence unavailable: ${item.explanation}`);
     } else {
       if (item.matchedFiles.length > 0)
-        lines.push(
-          `Evidence: ${item.matchedFiles.map((file) => `\`${file}\``).join(", ")}`,
-        );
+        lines.push(`Evidence: ${renderLocations(item)}`);
       if (item.status === "failed") {
         lines.push(`Finding: ${item.explanation}`);
         return [...lines, ""];

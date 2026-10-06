@@ -92,11 +92,70 @@ function workflowFiles(input: PullRequestReviewInput): string[] {
     .filter((file) => /^\.github\/workflows\/[^/]+\.(?:yml|yaml)$/i.test(file));
 }
 
+type ParsedPatchLine = {
+  readonly text: string;
+  readonly prefix: " " | "+" | "-";
+  readonly oldLine?: number;
+  readonly newLine?: number;
+};
+
+function parsePatchLines(patch: string): readonly ParsedPatchLine[] {
+  let oldLine: number | undefined;
+  let newLine: number | undefined;
+  const lines: ParsedPatchLine[] = [];
+  for (const raw of patch.split(/\r?\n/)) {
+    const hunk = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[2]);
+      continue;
+    }
+    if (oldLine === undefined || newLine === undefined) continue;
+    if (raw.startsWith("+++") || raw.startsWith("---")) continue;
+    if (raw.startsWith("+")) {
+      lines.push({ text: raw.slice(1), prefix: "+", newLine });
+      newLine += 1;
+    } else if (raw.startsWith("-")) {
+      lines.push({ text: raw.slice(1), prefix: "-", oldLine });
+      oldLine += 1;
+    } else if (raw.startsWith(" ")) {
+      lines.push({
+        text: raw.slice(1),
+        prefix: " ",
+        oldLine,
+        newLine,
+      });
+      oldLine += 1;
+      newLine += 1;
+    }
+  }
+  return lines;
+}
+
 function patchLocation(
   file: string,
   patch: string,
+  line?: ParsedPatchLine,
 ): RequirementEvidenceLocation {
   const hunk = patch.match(/^@@[^\r\n]*/m)?.[0];
+  if (line?.newLine !== undefined) {
+    return {
+      file,
+      side: "RIGHT",
+      startLine: line.newLine,
+      endLine: line.newLine,
+      ...(hunk === undefined ? {} : { patchHunk: hunk }),
+    };
+  }
+  if (line?.oldLine !== undefined) {
+    return {
+      file,
+      side: "LEFT",
+      startLine: line.oldLine,
+      endLine: line.oldLine,
+      ...(hunk === undefined ? {} : { patchHunk: hunk }),
+    };
+  }
   return { file, ...(hunk === undefined ? {} : { patchHunk: hunk }) };
 }
 
@@ -169,13 +228,13 @@ function actionEvidence(
   let unpinned: string | undefined;
   for (const file of files) {
     const patch = input.patches[file]!;
-    for (const line of patch.split(/\r?\n/)) {
-      if (!line.startsWith("+") || line.startsWith("+++")) continue;
-      const match = line.match(/uses:\s*([^\s@]+)@([^\s#]+)/i);
+    for (const line of parsePatchLines(patch)) {
+      if (line.prefix !== "+") continue;
+      const match = line.text.match(/uses:\s*([^\s@]+)@([^\s#]+)/i);
       if (!match) continue;
       const reference = `${match[1]}@${match[2]}`;
       observed.push(reference);
-      locations.push(patchLocation(file, patch));
+      locations.push(patchLocation(file, patch, line));
       if (!/^[0-9a-f]{40}$/i.test(match[2]!)) unpinned ??= reference;
     }
   }
@@ -231,21 +290,27 @@ function checkoutEvidence(
   let checkoutCount = 0;
   let missing = false;
   for (const file of files) {
-    const lines = input.patches[file]!.split(/\r?\n/);
+    const patch = input.patches[file]!;
+    const lines = parsePatchLines(patch);
     for (let index = 0; index < lines.length; index += 1) {
-      if (!/\+\s*-?\s*uses:\s*actions\/checkout@/i.test(lines[index]!))
+      const checkout = lines[index]!;
+      if (
+        checkout.prefix !== "+" ||
+        !/uses:\s*actions\/checkout@/i.test(checkout.text)
+      )
         continue;
       checkoutCount += 1;
       const block = lines.slice(index, Math.min(lines.length, index + 12));
       const setting = block.find((line) =>
-        /persist-credentials\s*:/i.test(line),
+        /persist-credentials\s*:/i.test(line.text),
       );
-      locations.push(patchLocation(file, input.patches[file]!));
-      if (setting && /persist-credentials\s*:\s*false\b/i.test(setting))
+      locations.push(patchLocation(file, patch, checkout));
+      if (setting) locations.push(patchLocation(file, patch, setting));
+      if (setting && /persist-credentials\s*:\s*false\b/i.test(setting.text))
         observed.push("persist-credentials: false");
       else {
         missing = true;
-        if (setting) observed.push(setting.replace(/^\+\s*/, "").trim());
+        if (setting) observed.push(setting.text.trim());
       }
     }
   }
