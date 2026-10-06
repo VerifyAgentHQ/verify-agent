@@ -29,6 +29,7 @@ export type RequirementEvidence = {
   readonly id: RequirementEvidenceId;
   readonly source: RequirementEvidenceSource;
   readonly requirementText: string;
+  readonly sourceText?: string;
   readonly rule: RequirementEvidenceRule;
   readonly status: RequirementEvidenceStatus;
   readonly explanation: string;

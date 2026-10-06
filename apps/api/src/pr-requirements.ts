@@ -8,6 +8,7 @@ import {
 
 export type RequirementResult = {
   readonly text: string;
+  readonly originalText?: string;
   readonly status: "passed" | "failed" | "unknown";
   readonly finding?: string;
   readonly evidence?: RequirementEvidence;
@@ -16,6 +17,12 @@ export type RequirementResult = {
 export type RequirementSourceText = {
   readonly source: RequirementEvidenceSource;
   readonly text: string;
+};
+
+export type RequirementCandidate = {
+  readonly source: RequirementEvidenceSource;
+  readonly text: string;
+  readonly originalText: string;
 };
 
 export type PullRequestReviewInput = {
@@ -37,40 +44,79 @@ function fallbackSource(): RequirementEvidenceSource {
   };
 }
 
-function requirementLines(
-  input: PullRequestReviewInput,
-): RequirementSourceText[] {
+function normalizeRequirementText(value: string): string {
+  return clean(value)
+    .replace(/\s+/g, " ")
+    .replace(
+      /^(?:requirement|task|requested change|acceptance criteria)\s*:\s*/i,
+      "",
+    )
+    .replace(/^(?:please\s+(?:also\s+)?|must\s+|ensure\s+)/i, "")
+    .replace(
+      /^(?:we\s+need\s+to|the\s+pr\s+(?:must|should|needs?\s+to)|this\s+change\s+(?:must|should|needs?\s+to)|you\s+must)\s+/i,
+      "",
+    )
+    .replace(/^make\s+sure\s+to\s+/i, "")
+    .trim();
+}
+
+function splitRequirementClauses(value: string): string[] {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+  return normalized
+    .split(
+      /\s*(?:;|\.(?=\s+[A-Z])|\s+and\s+(?=(?:add|include|create|write|remove|change|modify|pin|disable|ensure|update|do not|don't)\b))/i,
+    )
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function canonicalRequirementText(value: string): string | undefined {
+  const normalized = normalizeRequirementText(value).replace(/[.!?]+$/, "");
+  if (!normalized) return undefined;
+  if (
+    /pin\s+(?:all\s+)?(?:ci\s+)?actions?\b/i.test(normalized) &&
+    /immutable|commit\s+sha|sha\b/i.test(normalized)
+  )
+    return "Pin CI actions to verified immutable commits";
+  if (
+    /(?:disable|turn\s+off)\s+(?:persisted\s+)?checkout\s+credentials?/i.test(
+      normalized,
+    ) ||
+    /persist-credentials\s*:\s*false/i.test(normalized)
+  )
+    return "Disable persisted checkout credentials";
+  return normalized;
+}
+
+export function extractRequirementCandidates(
+  input: Pick<PullRequestReviewInput, "description" | "requirementSources">,
+): readonly RequirementCandidate[] {
   const sources = input.requirementSources ?? [
     { source: fallbackSource(), text: input.description },
   ];
-  const output: RequirementSourceText[] = [];
+  const output: RequirementCandidate[] = [];
   for (const item of sources) {
-    for (const line of item.text
-      .split(/\r?\n/)
-      .map((value) => value.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, "").trim())
-      .filter((value) =>
-        /^(?:add|remove|change|modify|do not modify|don't modify|pin|disable|include|must|ensure|write|update)\b/i.test(
-          value,
-        ),
-      )) {
-      const cleaned = clean(line);
-      if (
-        /pin\s+ci\s+actions.*disable\s+persisted\s+checkout\s+credentials/i.test(
-          cleaned,
+    for (const line of item.text.split(/\r?\n/)) {
+      const stripped = line
+        .replace(/^\s{0,3}#{1,6}\s+/, "")
+        .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, "")
+        .trim();
+      for (const clause of splitRequirementClauses(stripped)) {
+        const normalized = normalizeRequirementText(clause);
+        const text = canonicalRequirementText(clause);
+        if (
+          text === undefined ||
+          !/^(?:add|remove|change|modify|do not modify|don't modify|pin|disable|include|must|ensure|write|update|please|we need|the pr should|make sure)\b/i.test(
+            normalized,
+          )
         )
-      ) {
-        output.push(
-          {
-            source: item.source,
-            text: "Pin CI actions to verified immutable commits",
-          },
-          {
-            source: item.source,
-            text: "Disable persisted checkout credentials",
-          },
-        );
-      } else if (cleaned.length > 0) {
-        output.push({ source: item.source, text: cleaned });
+          continue;
+        output.push({
+          source: item.source,
+          text,
+          originalText: clause.trim(),
+        });
       }
     }
   }
@@ -80,10 +126,18 @@ function requirementLines(
         (candidate) =>
           candidate.text === item.text &&
           candidate.source.kind === item.source.kind &&
+          candidate.source.owner === item.source.owner &&
+          candidate.source.repository === item.source.repository &&
           candidate.source.number === item.source.number &&
           candidate.source.field === item.source.field,
       ) === index,
   );
+}
+
+function requirementLines(
+  input: PullRequestReviewInput,
+): RequirementCandidate[] {
+  return [...extractRequirementCandidates(input)];
 }
 
 function workflowFiles(input: PullRequestReviewInput): string[] {
@@ -168,6 +222,7 @@ function evidence(
   matchedFiles: readonly string[],
   locations: readonly RequirementEvidenceLocation[],
   observedText: readonly string[],
+  sourceText?: string,
 ): RequirementEvidence {
   const boundedObserved = observedText
     .slice(0, 100)
@@ -181,6 +236,7 @@ function evidence(
     boundedObserved,
     matchedFiles,
     locations,
+    sourceText,
   });
   const hash = createHash("sha256").update(payload).digest("hex");
   return {
@@ -189,6 +245,7 @@ function evidence(
     ),
     source,
     requirementText: text,
+    ...(sourceText === undefined || sourceText === text ? {} : { sourceText }),
     rule,
     status,
     explanation: boundedExplanation,
@@ -203,6 +260,7 @@ function actionEvidence(
   input: PullRequestReviewInput,
   source: RequirementEvidenceSource,
   text: string,
+  originalText?: string,
 ): RequirementResult {
   const files = workflowFiles(input);
   if (files.length === 0 || files.some((file) => !input.patches[file])) {
@@ -218,6 +276,7 @@ function actionEvidence(
     );
     return {
       text,
+      ...(originalText === undefined ? {} : { originalText }),
       status: "unknown",
       finding: item.explanation,
       evidence: item,
@@ -252,9 +311,11 @@ function actionEvidence(
     files,
     locations,
     observed,
+    originalText,
   );
   return {
     text,
+    ...(originalText === undefined ? {} : { originalText }),
     status,
     ...(status === "failed" ? { finding: explanation } : {}),
     evidence: item,
@@ -265,6 +326,7 @@ function checkoutEvidence(
   input: PullRequestReviewInput,
   source: RequirementEvidenceSource,
   text: string,
+  originalText?: string,
 ): RequirementResult {
   const files = workflowFiles(input);
   if (files.length === 0 || files.some((file) => !input.patches[file])) {
@@ -277,9 +339,11 @@ function checkoutEvidence(
       files,
       files.map((file) => patchLocation(file, input.patches[file] ?? "")),
       [],
+      originalText,
     );
     return {
       text,
+      ...(originalText === undefined ? {} : { originalText }),
       status: "unknown",
       finding: item.explanation,
       evidence: item,
@@ -331,9 +395,11 @@ function checkoutEvidence(
     files,
     locations,
     observed,
+    originalText,
   );
   return {
     text,
+    ...(originalText === undefined ? {} : { originalText }),
     status,
     ...(status === "failed" ? { finding: explanation } : {}),
     evidence: item,
@@ -344,6 +410,7 @@ function requiredFileEvidence(
   input: PullRequestReviewInput,
   source: RequirementEvidenceSource,
   text: string,
+  originalText?: string,
 ): RequirementResult {
   const match = text.match(
     /\b(?:add|include|create|write)\s+[`']?([^`'\s]+)[`']?/i,
@@ -361,9 +428,11 @@ function requiredFileEvidence(
       [],
       [],
       [],
+      originalText,
     );
     return {
       text,
+      ...(originalText === undefined ? {} : { originalText }),
       status: "unknown",
       finding: item.explanation,
       evidence: item,
@@ -388,9 +457,11 @@ function requiredFileEvidence(
     matched,
     matched.map((file) => ({ file })),
     changedFiles,
+    originalText,
   );
   return {
     text,
+    ...(originalText === undefined ? {} : { originalText }),
     status,
     ...(status === "failed" ? { finding: explanation } : {}),
     evidence: item,
@@ -404,17 +475,23 @@ export function evaluatePullRequestRequirements(
   for (const item of requirementLines(input)) {
     const lower = item.text.toLowerCase();
     if (lower.includes("pin") && lower.includes("action"))
-      results.push(actionEvidence(input, item.source, item.text));
+      results.push(
+        actionEvidence(input, item.source, item.text, item.originalText),
+      );
     else if (
       lower.includes("persisted credential") ||
       lower.includes("persisted checkout credential") ||
       lower.includes("persist-credentials")
     )
-      results.push(checkoutEvidence(input, item.source, item.text));
+      results.push(
+        checkoutEvidence(input, item.source, item.text, item.originalText),
+      );
     else if (
       /\b(?:add|include|create|write)\s+[`']?[^`'\s]+[`']?/i.test(item.text)
     )
-      results.push(requiredFileEvidence(input, item.source, item.text));
+      results.push(
+        requiredFileEvidence(input, item.source, item.text, item.originalText),
+      );
     else {
       const unknown = evidence(
         item.source,
@@ -425,6 +502,7 @@ export function evaluatePullRequestRequirements(
         [],
         [],
         [],
+        item.originalText,
       );
       results.push({
         text: item.text,

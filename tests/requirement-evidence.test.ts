@@ -8,7 +8,10 @@ import {
 } from "../packages/domain/src/index.js";
 import { createFileVerificationResultRegistry } from "../apps/worker/src/result-registry.js";
 import { renderMvpComment } from "../apps/api/src/github-pr-comment.js";
-import { evaluatePullRequestRequirements } from "../apps/api/src/pr-requirements.js";
+import {
+  evaluatePullRequestRequirements,
+  extractRequirementCandidates,
+} from "../apps/api/src/pr-requirements.js";
 import { calculateMvpVerdict } from "../apps/api/src/mvp-verdict.js";
 
 const source = {
@@ -42,6 +45,63 @@ function requirements(patchText = patch) {
 }
 
 describe("Requirement Evidence milestone", () => {
+  it("normalizes markdown/prose and splits compound requirements", () => {
+    const sourceText =
+      "Requirement: Please add `docs/verifyagent-phase6.md`; ensure pin CI actions to immutable commit SHAs and disable persisted checkout credentials.";
+    const candidates = extractRequirementCandidates({
+      description: sourceText,
+      requirementSources: [{ source, text: sourceText }],
+    });
+    expect(candidates.map((item) => item.text)).toEqual([
+      "Add docs/verifyagent-phase6.md",
+      "Pin CI actions to verified immutable commits",
+      "Disable persisted checkout credentials",
+    ]);
+    expect(candidates[0]?.originalText).toBe(
+      "Please add `docs/verifyagent-phase6.md`",
+    );
+    expect(candidates.every((item) => item.source === source)).toBe(true);
+  });
+
+  it("deduplicates normalized requirements while preserving unsupported wording", () => {
+    const candidates = extractRequirementCandidates({
+      description:
+        "- Add `docs/verifyagent-phase6.md`.\n- Please add `docs/verifyagent-phase6.md`.\n- Refactor the implementation carefully.",
+      requirementSources: [
+        { source, text: "Add `docs/verifyagent-phase6.md`." },
+      ],
+    });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.text).toBe("Add docs/verifyagent-phase6.md");
+
+    const unsupported = evaluatePullRequestRequirements({
+      description: "Ensure the implementation is maintainable.",
+      requirementSources: [
+        { source, text: "Ensure the implementation is maintainable." },
+      ],
+      changedFiles: [],
+      patches: {},
+    })[0]!;
+    expect(unsupported.status).toBe("unknown");
+    expect(unsupported.evidence?.sourceText).toBe(
+      "Ensure the implementation is maintainable",
+    );
+  });
+
+  it("extracts wrapped imperative requirements and preserves original wording", () => {
+    const result = evaluatePullRequestRequirements({
+      description: "Requirement: The PR must add `docs/verifyagent-phase6.md`.",
+      changedFiles: ["docs/verifyagent-phase6.md"],
+      patches: { "docs/verifyagent-phase6.md": "@@ -0,0 +1 @@\n+# Phase 6" },
+    })[0]!;
+    expect(result.text).toBe("add docs/verifyagent-phase6.md");
+    expect(result.originalText).toBe(
+      "Requirement: The PR must add `docs/verifyagent-phase6.md`.",
+    );
+    expect(result.status).toBe("passed");
+    expect(result.evidence?.source.kind).toBe("pull_request");
+  });
+
   it("passes only when an explicitly required file is changed", () => {
     const sourceText =
       "Add `docs/verifyagent-phase5.md` explaining the dogfood configuration.";
