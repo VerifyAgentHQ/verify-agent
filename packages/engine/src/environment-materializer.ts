@@ -65,11 +65,24 @@ export interface ExecutionEnvironmentMaterializationRequest {
   readonly generatedRequirements?: readonly GeneratedArtifactRequirement[];
 }
 
+export interface ExecutionEnvironmentDependencyVerification {
+  /** Names of the dependency subtree's entries at the composed-staging root. */
+  readonly topLevelEntries: readonly string[];
+  /** Trusted artifact content hash those bytes must still hash to. */
+  readonly artifactContentHash: string;
+}
+
 export interface ExecutionEnvironmentMaterializationResult {
   readonly destination: string;
   readonly identityHash: string;
   readonly dependencyArtifactId?: string;
   readonly generatedArtifactIds: readonly string[];
+  /**
+   * Batch 56C-R4 — where the verified dependency subtree landed, so the
+   * composed-snapshot store can re-verify it at its final location under the
+   * composition lease before publication.
+   */
+  readonly dependencyVerification?: ExecutionEnvironmentDependencyVerification;
 }
 
 /** Composes trusted source, dependency, and generated trees into one sandbox workspace. */
@@ -112,21 +125,50 @@ export class ExecutionEnvironmentMaterializer {
       }
     }
     await mkdir(destination, { recursive: true });
+    // Batch 56C-R1 — an already-published snapshot is immutable. Composition
+    // never mutates the source snapshot in place: it composes into a distinct
+    // staging tree that is validated and then atomically published (see
+    // `ComposedSnapshotStore`). In-place composition is rejected outright so
+    // no caller can accidentally republish over the authoritative snapshot.
+    if (sourceRoot === destination) {
+      throw new DependencyProvisioningError(
+        "materialization must not compose into the source snapshot in place",
+      );
+    }
     await cp(sourceRoot, destination, {
       recursive: true,
       dereference: true,
       force: false,
       errorOnExist: false,
     });
+    let dependencyVerification:
+      ExecutionEnvironmentDependencyVerification | undefined;
     if (request.dependencyProvisioning) {
       if (!this.dependencies.dependencyProvisioner)
         throw new DependencyProvisioningError(
           "dependency provisioner is required",
         );
+      // The provisioner atomically moves the verified dependency entries into
+      // the destination; entries that appear are exactly those dependency
+      // entries (a source/dependency top-level collision fails closed).
+      const before = new Set(await readdir(destination));
       await this.dependencies.dependencyProvisioner.provision(
         request.dependencyProvisioning,
         destination,
       );
+      const artifactContentHash =
+        request.dependencyProvisioning.artifact.artifactContentHash;
+      if (artifactContentHash !== undefined) {
+        const placed = (await readdir(destination)).filter(
+          (entry) => !before.has(entry),
+        );
+        dependencyVerification = Object.freeze({
+          topLevelEntries: Object.freeze(
+            [...placed].sort((a, b) => a.localeCompare(b)),
+          ),
+          artifactContentHash,
+        });
+      }
     }
     const generatedArtifactIds: string[] = [];
     if (requirements.length > 0) {
@@ -150,6 +192,9 @@ export class ExecutionEnvironmentMaterializer {
         request.environment,
         this.dependencies.configuration,
       ),
+      ...(dependencyVerification === undefined
+        ? {}
+        : { dependencyVerification }),
       ...(request.environment.dependencyEnvironment === undefined
         ? {}
         : {

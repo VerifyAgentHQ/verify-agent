@@ -4,10 +4,9 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createHash } from "node:crypto";
 import type { VerificationResultReader } from "@verify-agent/domain";
-import type { VerificationApplicationService as VerificationApplicationServiceType } from "@verify-agent/engine";
-import { createInMemoryVerificationJobQueue } from "@verify-agent/engine";
-import type { InMemoryVerificationJobQueue } from "@verify-agent/engine";
+import type { MvpVerificationApplicationService as VerificationApplicationServiceType } from "./mvp-application-service.js";
 import {
   createGitHubVerificationOrchestrator,
   createConfiguredGitHubWebhookHandler,
@@ -17,21 +16,20 @@ import {
 } from "@verify-agent/github-bot";
 import {
   createInMemoryVerificationResultRegistry,
+  createFileVerificationResultRegistry,
   createVerificationJobProcessor,
   createVerificationJobRuntime,
+  createInMemoryVerificationJobQueue,
   type VerificationJobProcessor,
   type VerificationJobRuntime,
   type VerificationJobSettledOutcome,
   type VerificationResultRegistry,
+  type InMemoryVerificationJobQueue,
 } from "@verify-agent/worker";
 import {
   createGitHubApiInstallationResolver,
   createGitHubAppInstallationTokenClient,
-  createGitHubCheckPublisher,
-  createGitHubRepositorySnapshot,
-  decodeGitHubSnapshotReference,
   readGitHubAppConfig,
-  type GitHubCheckPublisher,
 } from "@verify-agent/adapters-source";
 import {
   createConfiguredApplicationService,
@@ -39,6 +37,11 @@ import {
   readInternalResultToken,
 } from "./index.js";
 import { readGitHubWebhookSecret } from "@verify-agent/github-bot";
+import {
+  createGitHubPrCommentPublisher,
+  type GitHubPrCommentPublisher,
+  type MvpReview,
+} from "./github-pr-comment.js";
 
 /**
  * Batch 51 — Runnable In-Process GitHub Verification Service.
@@ -68,22 +71,9 @@ import { readGitHubWebhookSecret } from "@verify-agent/github-bot";
  * - Nothing secret is logged; no logging framework is introduced.
  * - Sequential in-process execution; no parallel workers.
  *
- * Batch 55A — when `checkPublisher` is provided, the service additionally
- * owns production Check publication:
- *
- * ```text
- * GitHub PR webhook → queued verification → VerificationResult settled
- *   → GitHubCheckPublisher automatically invoked (exact SHA, monotonic)
- * ```
- *
- * - Exactly one publisher subscription while started; none while stopped.
- * - Publication failures never mutate VerificationResult or the registry.
- *
- * Batch 55B — `startConfiguredGitHubVerificationService` constructs that
- * publisher from GitHub App configuration (`GITHUB_APP_ID` +
- * `GITHUB_APP_PRIVATE_KEY`, fail-closed) via
- * `createConfiguredGitHubCheckPublisher`, so the normal configured
- * startup publishes without any caller-supplied publisher.
+ * The current MVP consumes GitHub Actions check-runs while publishing its
+ * own result explanation as a PR comment. It does not publish VerifyAgent-
+ * owned Check Runs.
  */
 
 export interface GitHubVerificationServiceDependencies {
@@ -99,17 +89,8 @@ export interface GitHubVerificationServiceDependencies {
   readonly maxResults?: number;
   readonly createJobId?: () => string;
   readonly now?: () => string;
-  /**
-   * Batch 55A — production GitHub Check publisher owned by the running
-   * service. When present, the service subscribes exactly once on `start`
-   * and unsubscribes on `stop`/`close`, translating each completed
-   * `VerificationResult` into a Check Run for the exact verified commit.
-   * Publication failures never mutate verification truth.
-   */
-  readonly checkPublisher?: Pick<
-    GitHubCheckPublisher,
-    "publishVerificationResult"
-  > | null;
+  readonly commentPublisher?: GitHubPrCommentPublisher | null;
+  readonly resultStorePath?: string;
 }
 
 export interface GitHubVerificationService {
@@ -172,11 +153,18 @@ export function createGitHubVerificationService(
     dependencies.queue ?? createInMemoryVerificationJobQueue();
   const registry: VerificationResultRegistry =
     dependencies.registry ??
-    createInMemoryVerificationResultRegistry(
-      dependencies.maxResults === undefined
-        ? {}
-        : { maxResults: dependencies.maxResults },
-    );
+    (dependencies.resultStorePath
+      ? createFileVerificationResultRegistry({
+          filePath: dependencies.resultStorePath,
+          ...(dependencies.maxResults === undefined
+            ? {}
+            : { maxResults: dependencies.maxResults }),
+        })
+      : createInMemoryVerificationResultRegistry(
+          dependencies.maxResults === undefined
+            ? {}
+            : { maxResults: dependencies.maxResults },
+        ));
   const replayGuard: GitHubWebhookReplayGuard =
     dependencies.replayGuard ?? createInMemoryGitHubWebhookReplayGuard();
   const processor: VerificationJobProcessor =
@@ -256,99 +244,73 @@ export function createGitHubVerificationService(
   // No caller is required to drive `processNext()` manually for the
   // composed service to work.
 
-  // Batch 55A — lifecycle-owned Check publisher subscription. Exactly one
-  // active subscription while started; none while stopped. Uses the same
-  // single-flight start/stop transitions as the runtime (no second
-  // runtime, no queue, no event-bus framework).
-  const checkPublisher = dependencies?.checkPublisher ?? null;
-  let checkPublisherUnsubscribe: (() => void) | null = null;
+  const commentPublisher = dependencies?.commentPublisher ?? null;
+  let commentPublisherUnsubscribe: (() => void) | null = null;
 
-  function toCheckPublication(outcome: VerificationJobSettledOutcome): {
-    readonly result: VerificationJobSettledOutcome extends never
-      ? never
-      : import("@verify-agent/domain").VerificationResult;
-    readonly snapshot: import("@verify-agent/domain").RepositorySnapshot;
-    readonly repository: { readonly owner: string; readonly name: string };
-    readonly pullRequestNumber: number | undefined;
-    readonly expectedHeadSha: string;
-  } | null {
-    if (outcome.kind !== "completed") return null;
-    let reference: {
-      readonly owner: string;
-      readonly repository: string;
-      readonly sha: string;
-    };
-    try {
-      reference = decodeGitHubSnapshotReference(outcome.job.source.id);
-    } catch {
-      return null;
-    }
-    let snapshot: import("@verify-agent/domain").RepositorySnapshot;
-    try {
-      snapshot = createGitHubRepositorySnapshot({
-        kind: "github-snapshot",
-        owner: reference.owner,
-        repository: reference.repository,
-        sha: reference.sha,
-      });
-    } catch {
-      return null;
-    }
-    const trigger = outcome.job.trigger as
-      | { readonly kind?: unknown; readonly pullRequestNumber?: unknown }
-      | undefined;
-    const pullRequestNumber =
-      typeof trigger?.pullRequestNumber === "number" &&
-      Number.isInteger(trigger.pullRequestNumber) &&
-      (trigger.pullRequestNumber as number) > 0
-        ? (trigger.pullRequestNumber as number)
-        : undefined;
-    return {
-      result: outcome.result,
-      snapshot,
-      repository: { owner: reference.owner, name: reference.repository },
-      pullRequestNumber,
-      expectedHeadSha: reference.sha.toLowerCase(),
-    };
+  function attachCommentPublisher(): void {
+    if (!commentPublisher) return;
+    if (commentPublisherUnsubscribe !== null) return;
+    commentPublisherUnsubscribe = runtime.onSettled((outcome) => {
+      if (!commentPublisher || outcome.kind !== "completed") return;
+      const parts = outcome.job.source.id.split(":");
+      const number = outcome.job.trigger.pullRequestNumber;
+      if (parts.length !== 3 || !Number.isInteger(number)) return;
+      void commentPublisher
+        .publish({
+          result: outcome.result,
+          owner: parts[0]!,
+          repository: parts[1]!,
+          commitSha: parts[2]!,
+          pullRequestNumber: number,
+        })
+        .then((review) => {
+          if (!review || typeof review !== "object" || !("status" in review))
+            return;
+          const mvpReview = review as MvpReview;
+          const requirementState =
+            mvpReview.requirements.length === 0
+              ? "UNKNOWN"
+              : mvpReview.requirements.some((item) => item.status === "failed")
+                ? "FAIL"
+                : mvpReview.requirements.some(
+                      (item) => item.status === "unknown",
+                    )
+                  ? "UNKNOWN"
+                  : "PASS";
+          const summary = `MVP verdict: ${mvpReview.status.toUpperCase()} (GitHub CI: ${mvpReview.ci}; requirements: ${requirementState}).`;
+          const mvpResult = {
+            ...outcome.result,
+            status: mvpReview.status,
+            summary,
+            requirementEvidence: mvpReview.evidence,
+            contentHash: createHash("sha256")
+              .update(
+                JSON.stringify({
+                  ...outcome.result,
+                  status: mvpReview.status,
+                  summary,
+                }),
+              )
+              .digest("hex"),
+          };
+          registry.store(outcome.job.jobId, mvpResult);
+        })
+        .catch((error: unknown) => {
+          console.error(
+            `VerifyAgent PR comment publication failed for ${parts[0]}/${parts[1]}#${number}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+    });
   }
 
-  function handleSettledForChecks(
-    outcome: VerificationJobSettledOutcome,
-  ): void {
-    if (!checkPublisher) return;
-    const derived = toCheckPublication(outcome);
-    if (!derived) return;
-    // Publication failure must never corrupt verification truth:
-    // no registry mutation, no result mutation, no retries, no secret
-    // logging. The publisher already fails closed before network on
-    // identity mismatches.
-    void checkPublisher
-      .publishVerificationResult({
-        result: derived.result,
-        snapshot: derived.snapshot,
-        repository: derived.repository,
-        ...(derived.pullRequestNumber === undefined
-          ? {}
-          : { pullRequestNumber: derived.pullRequestNumber }),
-        expectedHeadSha: derived.expectedHeadSha,
-      })
-      .catch(() => {});
-  }
-
-  function attachCheckPublisher(): void {
-    if (!checkPublisher) return;
-    if (checkPublisherUnsubscribe !== null) return;
-    checkPublisherUnsubscribe = runtime.onSettled(handleSettledForChecks);
-  }
-
-  function detachCheckPublisher(): void {
-    if (checkPublisherUnsubscribe !== null) {
+  function detachCommentPublisher(): void {
+    if (commentPublisherUnsubscribe !== null) {
       try {
-        checkPublisherUnsubscribe();
+        commentPublisherUnsubscribe();
       } catch {
         // Unsubscribe must never break shutdown.
       }
-      checkPublisherUnsubscribe = null;
+      commentPublisherUnsubscribe = null;
     }
   }
 
@@ -382,7 +344,7 @@ export function createGitHubVerificationService(
         listenHost = host;
         accepting = true;
         runtime.startAutoProcessing();
-        attachCheckPublisher();
+        attachCommentPublisher();
         try {
           await new Promise<void>((resolve, reject) => {
             server.once("error", reject);
@@ -394,10 +356,10 @@ export function createGitHubVerificationService(
         } catch (error) {
           // Transactional startup: a failed bind must leave no background
           // work behind. Stop the runtime, detach the queue wakeup
-          // listener AND the Check publisher callback, reset lifecycle
+          // listener and comment callback, reset lifecycle
           // state, close any partially opened server resource, and rethrow
           // the original bind error.
-          detachCheckPublisher();
+          detachCommentPublisher();
           accepting = false;
           started = false;
           try {
@@ -443,7 +405,7 @@ export function createGitHubVerificationService(
           }
         }
         accepting = false;
-        detachCheckPublisher();
+        detachCommentPublisher();
         await runtime.stopAutoProcessing();
         runtime.stop();
         started = false;
@@ -481,7 +443,7 @@ export function createGitHubVerificationService(
           }
         }
         accepting = false;
-        detachCheckPublisher();
+        detachCommentPublisher();
         await runtime.stopAutoProcessing();
         runtime.stop();
         started = false;
@@ -532,22 +494,10 @@ function readConfiguredApiBaseUrl(env: NodeJS.ProcessEnv): string | undefined {
   return raw.trim();
 }
 
-/**
- * Batch 55B — configured GitHub Check publisher construction.
- *
- * Reuses the existing GitHub App authentication infrastructure (no second
- * JWT/token implementation, no `GITHUB_TOKEN`, no Batch 54A token mode):
- * `readGitHubAppConfig` → `createGitHubApiInstallationResolver` →
- * `createGitHubAppInstallationTokenClient` → `createGitHubCheckPublisher`.
- *
- * Fail-closed: absent/incomplete App configuration throws the existing
- * `GitHubAppConfigurationError` (diagnosable, no secrets) before any
- * network access; no publisher is fabricated and no token fallback occurs.
- */
-export function createConfiguredGitHubCheckPublisher(
+export function createConfiguredGitHubPrCommentPublisher(
   env: NodeJS.ProcessEnv = process.env,
   overrides?: { readonly fetch?: typeof globalThis.fetch },
-): GitHubCheckPublisher {
+): GitHubPrCommentPublisher {
   const appConfig = readGitHubAppConfig(env);
   const apiBaseUrl = readConfiguredApiBaseUrl(env);
   const fetch = overrides?.fetch ?? globalThis.fetch;
@@ -561,7 +511,7 @@ export function createConfiguredGitHubCheckPublisher(
     ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),
     ...(fetch === undefined ? {} : { fetch }),
   });
-  return createGitHubCheckPublisher({
+  return createGitHubPrCommentPublisher({
     appConfig,
     installationResolver,
     installationTokenClient,
@@ -589,21 +539,15 @@ export interface ConfiguredGitHubVerificationServiceOptions {
 }
 
 /**
- * Normal configured startup for the Batch 51 single-process service.
+ * Normal configured startup for the single-process MVP service.
  *
  * Reuses existing environment patterns: `GITHUB_WEBHOOK_SECRET` (required,
  * fail-closed), `VERIFY_INTERNAL_RESULT_TOKEN` (optional; when absent the
  * result route stays unavailable per Batch 50 fail-closed semantics),
- * GitHub App credentials where already supported, and the sandbox
- * transport configuration (`VERIFY_SANDBOX_PROCESS`). No second
- * configuration system, no hardcoded secrets, no secret exposure.
- *
- * Batch 55B — additionally constructs the GitHub App-authenticated Check
- * publisher from the same environment and wires it as the service's
- * single lifecycle-owned settled-result subscription, so real
- * webhook-triggered verification publishes a Check Run without any
- * caller-supplied publisher. Missing/incomplete App configuration fails
- * closed (no `GITHUB_TOKEN` fallback, no fabricated publisher).
+ * GitHub App credentials where already supported, and the legacy
+ * sandbox-backed application service. The MVP comment publisher reads
+ * authoritative GitHub Actions checks; it does not publish VerifyAgent-owned
+ * Check Runs.
  */
 export async function startConfiguredGitHubVerificationService(
   options: ConfiguredGitHubVerificationServiceOptions = {},
@@ -613,7 +557,7 @@ export async function startConfiguredGitHubVerificationService(
   const internalResultToken = readInternalResultToken(env);
   const applicationService =
     options.applicationService ?? createConfiguredApplicationService();
-  const checkPublisher = createConfiguredGitHubCheckPublisher(
+  const commentPublisher = createConfiguredGitHubPrCommentPublisher(
     env,
     options.fetch === undefined ? undefined : { fetch: options.fetch },
   );
@@ -621,7 +565,9 @@ export async function startConfiguredGitHubVerificationService(
     applicationService,
     secret,
     ...(internalResultToken === null ? {} : { internalResultToken }),
-    checkPublisher,
+    commentPublisher,
+    resultStorePath:
+      env.VERIFY_RESULT_STORE_PATH ?? ".local/verifyagent-results.json",
   });
   const port = options.port ?? readConfiguredPort(env);
   const host = options.host ?? "0.0.0.0";

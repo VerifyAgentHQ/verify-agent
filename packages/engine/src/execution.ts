@@ -169,7 +169,13 @@ export function mapCheckExecutionToSandboxJobRequest(
     schemaVersion: "1.0.0",
     jobId: toSandboxWireJobId(request.execution.jobId),
     source: toPublicSourceReference(request.snapshot.source),
-    snapshot: request.snapshot.sourceState.value,
+    // Batch 56C-R1 — the sandbox resolves the exact opaque snapshot identity
+    // carried by the execution environment (a completed, atomically published
+    // composition). Without a materialized environment this is the historical
+    // `snapshot.sourceState.value` (the exact source identity).
+    snapshot:
+      request.executionEnvironment?.sandboxSnapshotIdentity ??
+      request.snapshot.sourceState.value,
     commands: Object.freeze([commandFromSpec(spec)]),
     resourceLimits: safeLimits,
     networkPolicy: "none",

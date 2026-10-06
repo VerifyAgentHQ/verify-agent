@@ -32,55 +32,41 @@ VerificationResult
 
 ## What VerifyAgent does
 
-A pull request arrives. VerifyAgent authenticates it, resolves the exact source revision, detects the project type, plans applicable checks, executes them in an isolated boundary, collects structured evidence, applies deterministic policy, and produces an immutable `VerificationResult`.
+A pull request arrives. VerifyAgent authenticates it, reads the issue/PR requirements and exact diff, consumes authoritative GitHub Actions check-runs, applies deterministic requirement rules, and publishes one evidence-linked result comment on the PR.
 
 This is not an AI code review tool. VerifyAgent gathers **evidence** about a software change and applies **explicit policy** to determine whether the change meets verifiable criteria. AI reasoning, when present, interprets evidence but never overrides deterministic facts.
 
-## Current status
+## Current MVP source of truth
 
-The verification core is implemented and tested. The pipeline from webhook authentication through source acquisition, project detection, check planning, sandbox transport, evidence aggregation, policy evaluation, and `VerificationResult` assembly is functional. Authenticated GitHub PR events are composed through queue → worker → source resolution → verification service in a focused integration proof (`tests/batch-48-pr-verification-composition.test.ts`, in-memory queue with manual worker consumption). An in-process job runtime consumes queued jobs through the existing worker and exposes completed results through a bounded in-memory registry (`tests/batch-49-job-runtime.test.ts`; process-local, non-durable, no background deployment). The registry correlates each originating `VerificationQueueJob.jobId` with its `VerificationResult` without merging the queue and result identity domains. Asynchronous Verification Result Observation (`tests/batch-50-async-result.test.ts`) exposes retained results via the explicitly protected `GET /verification-jobs/:queueJobId/result` route through the provider-neutral `VerificationResultReader` port plus a dedicated internal result bearer token (`Authorization: Bearer <token>`, configured via `VERIFY_INTERNAL_RESULT_TOKEN`); the authenticated webhook `202` response returns the originating `queueJobId` lookup handle, which is only a correlation handle and never an authentication credential. Batch 50 is asynchronous result observation that is process-local, bounded, non-durable, explicitly protected, and not yet a general public production result API: `200` means a result is currently retained (authenticated callers only), `401` means missing/invalid internal token with no existence oracle, `404` means no retained result is currently available (not completed yet, evicted, restarted, or unknown) and never claims verification never happened. Normal configured API-only startup wires no result reader/token, so the async result route is unavailable there (`404 route not found`). Real TypeScript and Rust end-to-end verification is covered by host-subprocess tests and a gated external-sandbox test suite; Docker-backed execution requires the external `verify-sandbox` environment. Batch 51 adds a runnable single-process GitHub verification service (`apps/api/src/github-verification-service.ts`, proven in `tests/batch-51-github-verification-service.test.ts`): one shared in-memory queue, one application-owned runtime with automatic event-driven in-process consumption (no manual `processNext()`), one worker, one bounded result registry, and one protected result reader/API on a single HTTP server (`POST /webhook` + `GET /health` + `POST /verify` + protected `GET /verification-jobs/:queueJobId/result`) with explicit start/stop lifecycle. It is in-memory, non-durable, single-process, with no retries, no horizontal workers, no persistent results, and no GitHub result writeback (no Checks, statuses, comments, reviews, or labels).
+```text
+pull_request webhook -> queue/worker -> requirement and diff inspection
+  -> GitHub Actions check-runs -> deterministic MVP verdict
+  -> durable JSON result -> one updated GitHub PR comment
+```
 
-### Implemented
+GitHub Actions is authoritative for build, typecheck, lint, and test results. The custom `verify-sandbox` execution path and older local verification engine remain as frozen/legacy infrastructure; they are not authoritative for the GitHub PR MVP.
 
-| Capability                  | Status      | Detail                                                                                                                                                                                                                       |
-| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Domain model                | Implemented | Branded IDs, validation, immutability, entity model (~750+ lines)                                                                                                                                                            |
-| Verification pipeline       | Implemented | Detection, planning, execution, evidence, policy, result                                                                                                                                                                     |
-| GitHub webhook auth         | Implemented | HMAC-SHA256 with timing-safe comparison                                                                                                                                                                                      |
-| Replay protection           | Implemented | TTL-based reserve/commit/rollback                                                                                                                                                                                            |
-| GitHub App auth             | Implemented | RS256 JWT, installation token acquisition                                                                                                                                                                                    |
-| Source snapshot acquisition | Implemented | Commit/tree/blob fetching at exact SHA                                                                                                                                                                                       |
-| Project detection           | Implemented | TypeScript/JavaScript and Rust/Soroban static detection                                                                                                                                                                      |
-| Check planning              | Implemented | Deterministic, content-hashed, dependency-ordered                                                                                                                                                                            |
-| Check definitions           | Implemented | 11 definitions, 8 with executable specs                                                                                                                                                                                      |
-| Sandbox transport           | Implemented | Subprocess-based with bounded I/O, timeout, abort                                                                                                                                                                            |
-| Evidence aggregation        | Implemented | Deterministic, content-hashed findings                                                                                                                                                                                       |
-| Policy evaluation           | Implemented | 5 deterministic rules, provider-independent                                                                                                                                                                                  |
-| VerificationResult          | Implemented | Immutable, content-hashed result assembly                                                                                                                                                                                    |
-| TypeScript E2E tests        | Implemented | 10 host-subprocess tests, 16 real sandbox tests                                                                                                                                                                              |
-| Rust E2E tests              | Implemented | Host-subprocess E2E verification                                                                                                                                                                                             |
-| Truth-matrix fixtures       | Implemented | 7 known-truth TypeScript and Rust snapshots                                                                                                                                                                                  |
-| API server                  | Implemented | HTTP health + verify + async result endpoints                                                                                                                                                                                |
-| Worker boundary             | Implemented | Validates and delegates to application service                                                                                                                                                                               |
-| GitHub verification service | Implemented | Single-process webhook → queue → auto runtime → result composition; GitHub-triggered jobs request deterministic applicable-check selection (`all-applicable`) resolved by detection → planner, never by a webhook check list |
+## Foundation Complete
 
-### Partial / conditional
+The following capabilities are fully implemented and tested:
 
-| Capability       | Status  | Blocker                                                        |
-| ---------------- | ------- | -------------------------------------------------------------- |
-| Secure execution | Partial | Requires external `verify-sandbox` process or Docker           |
-| Worker loop      | Partial | In-process auto consumption only; no retry or graceful workers |
-| Queue durability | Partial | In-memory only; no Redis/SQS                                   |
+- GitHub webhook authentication (HMAC-SHA256 with timing-safe comparison)
+- GitHub App authentication (RS256 JWT, installation token acquisition)
+- Exact SHA source acquisition (commit/tree/blob fetching at exact SHA)
+- Dependency provisioning architecture (offline, deterministic, content-addressed)
+- External verify-sandbox integration (subprocess transport, Docker-backed execution)
+- Deterministic verification (detection, planning, execution, evidence, policy)
+- Immutable VerificationResult (content-hashed, evidence-backed)
+- Protected result observation (provider-neutral VerificationResultReader port, internal bearer token)
+- GitHub Actions check-run consumption for authoritative CI evidence
+- Real GitHub dogfood (single-process webhook → queue → requirement review → PR comment)
+- Sandbox lifecycle ownership hardening (atomic composition, TOCTOU integrity, trust boundaries)
 
-### Not yet implemented
+## Current Product Status
 
-- Background worker loop (job polling, retry, graceful shutdown)
-- Durable job queue (Redis, SQS, BullMQ)
-- GitHub feedback posting (PR comments, status checks)
-- AI provider SDK integration (service layer exists; no provider installed)
-- GOAT integration
-- Dashboard, marketplace, or payment features
-- Database persistence
+> **VerifyAgent has a working GitHub PR MVP, validated against a real PR and GitHub App installation.**
+
+The active path uses the authenticated webhook queue, deterministic PR requirement checks, GitHub check-run evidence, a file-backed result registry, and create-or-update PR comment publication. The legacy sandbox-backed engine is not part of the active verdict path.
 
 ## Repository structure
 
@@ -98,37 +84,26 @@ verify-agent/
     ai/                     Provider-neutral reasoning boundary (no SDK)
     adapters-lang/          TypeScript + Rust project detection
     adapters-source/        GitHub API source provider, App JWT auth
-    config/                 Configuration type definitions
-    goat/                   Reserved namespace (placeholder)
-  tests/                    41 test files covering all boundaries
-  fixtures/truth-matrix/    Known-truth TypeScript and Rust snapshots
+  tests/                    17 descriptive tests for the active boundary and retained models
   docs/                     Architecture, readiness audit, ADRs
 ```
 
-## Local CLI (dogfood)
-
-A local CLI entry point is provided for development and dogfooding. It runs the verification pipeline against a local repository directory.
-
-```bash
-# Run verification against a local repository
-pnpm verify <path> --allow-host-execution
-
-# JSON output
-pnpm verify <path> --allow-host-execution --json
-```
-
-**Important**: The local CLI executes repository tooling directly on the host machine. It is NOT sandbox-isolated and NOT the external `verify-sandbox`. Untrusted repositories should NOT be run through this mode. The `--allow-host-execution` flag is required to acknowledge this.
-
-The local CLI is a development tool, not a production execution boundary. The production architecture delegates untrusted code execution to the external `verify-sandbox` boundary.
+The former host-execution CLI and truth-matrix fixtures were removed from the
+active repository. The sandbox-backed engine remains only as frozen source for
+future evaluation and compatibility work.
 
 ## Security model
 
 - **Webhook integrity**: GitHub webhook signatures are verified over exact received bytes using HMAC-SHA256 with timing-safe comparison.
 - **Replay protection**: TTL-based reserve/commit/rollback prevents webhook replay at the application boundary.
 - **Source identity**: The PR head SHA is extracted, validated as 40-char hex, and used as the immutable source snapshot identity.
-- **Sandbox isolation**: Production verification delegates untrusted code execution to the external `verify-sandbox` boundary. The local CLI (dogfood mode) is an explicit exception that executes on the host with `--allow-host-execution` and is NOT sandbox-isolated.
+- **CI authority**: GitHub Actions is authoritative for build, typecheck, lint, and test results. VerifyAgent consumes those results and does not execute ordinary CI commands itself.
 - **Fail-closed transport**: `SubprocessSandboxTransport` uses `shell: false`, no host environment inheritance, bounded I/O, timeout enforcement, and JSON-lines protocol validation.
 - **Provenance tracking**: Execution source (`real`, `simulated`, `fixture`) is immutable per transport instance and propagated through the entire evidence chain.
+
+The authenticated `POST /webhook` route is the GitHub production entrypoint.
+The synchronous `POST /verify` route is an unauthenticated internal/manual API
+for controlled use and is not intended for public production exposure.
 
 The sandbox is not yet represented as a production-grade arbitrary-code multi-tenant isolation guarantee. Docker backend limitations are documented in the threat model.
 
@@ -154,20 +129,18 @@ pnpm build
 pnpm test
 ```
 
-### Running E2E verification tests
+### Running active MVP tests
 
 ```bash
-# Host-subprocess TypeScript E2E (no Docker required)
-$env:VERIFY_REAL_SANDBOX="1"
-pnpm test -- tests/batch-43-typescript-e2e.test.ts
+# MVP verdict and comment rendering
+pnpm test -- tests/mvp-verdict.test.ts tests/mvp-comment.test.ts
 
-# Real sandbox E2E (requires external verify-sandbox + Docker)
-$env:VERIFY_SANDBOX_PROCESS="/path/to/verify-sandbox"
-$env:VERIFY_SANDBOX_IDENTITY="verify-sandbox-process-0.1.0"
-pnpm test -- tests/batch-43-real-sandbox.test.ts
+# Webhook authentication, replay protection, and queue orchestration
+pnpm test -- tests/github-webhook.test.ts tests/github-webhook-http.test.ts tests/github-verification-orchestration.test.ts
 ```
 
-Tests skip with clear messages when environment gates are not configured.
+Sandbox execution tests are frozen historical coverage and are no longer part
+of the active test tree.
 
 ## Verification pipeline
 
@@ -185,47 +158,19 @@ PR event parsing -> immutable head SHA
         |
         v
 GitHub App JWT -> installation -> token
+PR/issue requirements + exact changed files/diff
         |
         v
-Source snapshot at exact SHA
+GitHub Actions check-runs
         |
         v
-SHA-keyed snapshot publication (exact bytes under <commit-SHA>)
+Deterministic requirement checks + MVP verdict
         |
         v
-VerificationQueueJob
+Durable local result
         |
         v
-Worker -> ApplicationService.verifySource()
-        |
-        v
-Project detection (TypeScript/JavaScript, Rust/Soroban)
-        |
-        v
-Check planning (deterministic, dependency-ordered)
-        |
-        v
-Execution
-  Production: external verify-sandbox boundary (isolated)
-  Local CLI:   host-subprocess (--allow-host-execution required, NOT sandbox-isolated)
-        |
-        v
-Evidence aggregation
-        |
-        v
-Policy evaluation (5 deterministic rules)
-        |
-        v
-VerificationResult (immutable, content-hashed)
-        |
-        v
-GitHub Check Run (Batch 55/55A/55B/55C/55D: configured startup constructs the
-App-authenticated publisher and wires one lifecycle-owned subscription;
-result mirrored to the exact commit via the GitHub App with checks:write;
-SHA-bound, only App-owned runs trusted/updated, monotonic/stale-safe via a
-versioned external_id freshness marker that survives LRU eviction and
-restarts (serialization stays process-local); verification truth stays in
-VerifyAgent)
+One create-or-update GitHub PR comment
 ```
 
 ## Supported ecosystems
@@ -237,29 +182,49 @@ VerifyAgent)
 
 The architecture supports adding new ecosystems by implementing a `ProjectDetector` and execution specs without changing the domain, engine, checks, or policy packages.
 
-## Roadmap
+## Productization Roadmap
 
-### Current
+### P1 — Baseline cleanup and documentation reconciliation
 
-- Verification core (domain, engine, checks, policy)
-- Sandbox integration architecture and E2E test coverage
-- TypeScript host-subprocess E2E verification
-- Rust host-subprocess E2E verification
-- Truth-matrix fixtures (7 known-truth snapshots)
-- CI gate matching local pre-push validation
+_Repository hygiene, permanent test classification, documentation accuracy_ ✓ **COMPLETE**
 
-### Next
+### P2 — Durable verification lifecycle
 
-- Runnable-service E2E through the external sandbox (component-level TypeScript/Soroban real-sandbox proofs exist; service-level coverage in `tests/batch-52-real-service-sandbox-e2e.test.ts` is gated on `verify-sandbox` + Docker + `VERIFY_SANDBOX_IDENTITY`)
-- Durable execution infrastructure (workers, queue)
-- Production hardening (monitoring, rate limiting, credential management)
-- GitHub developer feedback loop (PR comments, status checks)
+_Replace in-memory queue/result registry with authoritative durable store_
 
-### Longer-term
+- Preserves: VerificationResult model, policy semantics, evidence semantics, source identity, snapshot identity, dependency identity, and the frozen sandbox/check-publication contracts
+- Adds: Redis/SQS/BullMQ queue, persistent result storage, worker recovery
 
-- AI-assisted reasoning after deterministic evidence
-- Additional ecosystem support (Python, Go, Solidity, Java, C/C++)
-- Agent interfaces, specialist verification agents
+### P3 — Worker recovery and idempotent retries
+
+_Background job polling, retry with backoff, graceful shutdown, dead-letter handling_
+
+### P4 — Deployable production composition
+
+_Docker/Kubernetes deployment, credential management, health checks, monitoring_
+
+### P5 — Developer-facing result experience
+
+_PR comments, commit statuses, merge protection, result dashboard_
+
+### P6 — Operational hardening
+
+_Rate limiting, multi-repository support, policy configurability, audit logging_
+
+## P2 Boundary
+
+P2 will replace the current in-memory queue and result registry as the authoritative lifecycle store. P2 must preserve:
+
+- VerificationResult model
+- Policy semantics
+- Evidence semantics
+- Source identity
+- Snapshot identity
+- Dependency identity
+- Sandbox execution contract
+- GitHub Check Run contract
+
+P1 does NOT implement any of this.
 
 ## Documentation
 

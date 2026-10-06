@@ -258,17 +258,51 @@ async function readPublishedTree(
   return (await walk(destination, "")) ? files : undefined;
 }
 
+/**
+ * Batch 56C — provisioned-tree prefixes tolerated by publication.
+ *
+ * The snapshot-store directory is the single sandbox-visible workspace:
+ * source files are published under the exact commit SHA, then trusted
+ * offline dependencies and generated output are composed into the SAME
+ * directory via `ExecutionEnvironmentMaterializer` (no second workspace,
+ * no protocol change, `artifactPolicy` stays `"none"`).
+ *
+ * Those composed trees are verified separately (provisioner integrity +
+ * launcher checks, preparer bounds) and must not invalidate source
+ * publication. Source files themselves remain exact: every expected entry
+ * must exist with byte-identical content, and any extra file outside these
+ * trusted composition prefixes still fails closed as a conflicting tree.
+ */
+const PROVISIONED_TREE_PREFIXES = Object.freeze([
+  "node_modules/",
+  ".next/",
+  "generated/",
+]);
+
+function isProvisionedTreePath(path: string): boolean {
+  return PROVISIONED_TREE_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
 function treesEqual(
   published: Map<string, Buffer>,
   expected: readonly ValidatedEntry[],
 ): boolean {
-  if (published.size !== expected.length) return false;
   for (const entry of expected) {
     const actual = published.get(entry.path);
     if (actual === undefined) return false;
     if (sha256Hex(actual) !== sha256Hex(Buffer.from(entry.text, "utf8"))) {
       return false;
     }
+  }
+  // Exact source subset must match; extras are allowed only when they are
+  // trusted composition output (provisioned dependencies / generated
+  // artifacts). Anything else (stale or foreign source files) still fails
+  // closed, preserving the SHA-immutability invariant.
+  if (published.size === expected.length) return true;
+  const expectedPaths = new Set(expected.map((entry) => entry.path));
+  for (const path of published.keys()) {
+    if (expectedPaths.has(path)) continue;
+    if (!isProvisionedTreePath(path)) return false;
   }
   return true;
 }

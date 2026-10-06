@@ -26,12 +26,10 @@
     { "path": "./packages/checks" },
     { "path": "./packages/policy" },
     { "path": "./packages/ai" },
-    { "path": "./packages/goat" },
     { "path": "./packages/adapters-lang" },
     { "path": "./packages/adapters-source" },
     { "path": "./packages/config" },
     { "path": "./apps/api" },
-    { "path": "./apps/cli" },
     { "path": "./apps/worker" },
     { "path": "./apps/github-bot" }
   ]

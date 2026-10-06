@@ -1,5 +1,10 @@
 # VerifyAgent architecture
 
+> **Current product path:** GitHub PR webhook -> requirement/diff inspection ->
+> GitHub Actions check-run evidence -> deterministic MVP verdict -> durable
+> result -> one PR comment. The sandbox-backed execution architecture described
+> below is frozen/legacy infrastructure, not the authority for this MVP.
+
 ## Purpose
 
 VerifyAgent is an evidence-first verification platform for software changes. The product consumes public contract semantics from `verify-contracts`, communicates with the isolated execution boundary in `verify-sandbox`, and keeps its internal semantic model separate from public wire formats.
@@ -28,7 +33,6 @@ EXTERNAL ADAPTERS
 - `packages/adapters-source`: source-of-truth adapter boundary for repository metadata and change set extraction.
 - `packages/adapters-lang`: language detection and project profile abstraction for TypeScript, Rust, and future ecosystems.
 - `packages/config`: runtime configuration abstraction without environment-specific runtime dependencies.
-- `packages/goat`: reserved future boundary; intentionally absent from implementation logic in Phase 0.
 - `apps/api`, `apps/worker`, `apps/github-bot`: service and integration shell boundaries only.
 
 ## Dependency direction

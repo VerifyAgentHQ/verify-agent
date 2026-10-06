@@ -13,6 +13,7 @@ import type {
 } from "./identifiers.js";
 import type { ChangeSetId } from "./changes-internal.js";
 import type { RepositorySnapshot, SourceReference } from "./source.js";
+import type { RequirementEvidence } from "./requirement-evidence.js";
 
 export type RequestActor = "human" | "system" | "agent" | "source-platform";
 export type VerificationMode =
@@ -65,6 +66,7 @@ export interface VerificationResult {
   readonly resultVersion: string;
   readonly contentHash: string;
   readonly createdAt: string;
+  readonly requirementEvidence?: readonly RequirementEvidence[];
 }
 
 export interface PublicVerificationTarget {

@@ -7,6 +7,7 @@ export * from "./changes.js";
 export * from "./checks.js";
 export * from "./check-plan.js";
 export * from "./evidence.js";
+export * from "./requirement-evidence.js";
 export * from "./findings.js";
 export * from "./policy.js";
 export * from "./verification.js";

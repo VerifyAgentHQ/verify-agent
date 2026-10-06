@@ -10,8 +10,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --config vitest.config.mjs",
-    "lint": "tsc -b --pretty false",
-    "verify": "node apps/cli/dist/index.js"
+    "lint": "tsc -b --pretty false"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

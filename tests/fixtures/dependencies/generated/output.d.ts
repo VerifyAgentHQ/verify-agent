@@ -1,1 +1,0 @@
-export type GeneratedValue = string;

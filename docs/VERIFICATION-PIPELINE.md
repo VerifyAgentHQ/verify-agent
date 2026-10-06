@@ -1,5 +1,10 @@
 # Verification pipeline
 
+> **Status: frozen/legacy engine documentation.** The active GitHub PR MVP does
+> not execute ordinary CI in this pipeline. It consumes GitHub Actions
+> check-runs and uses `apps/api/src/pr-requirements.ts` plus
+> `apps/api/src/mvp-verdict.ts` for the authoritative PR verdict.
+
 The pipeline is staged so that static project detection is separated from check planning and execution.
 
 ```text
@@ -160,3 +165,78 @@ present and excludes format-string/escaped literals like `%s:\`, so the
 `\\server\share` remain rejected. The approved runner is Linux amd64 with Node
 24.19.0 and pnpm 11.21.0, so artifacts must be built in a compatible trusted
 environment.
+
+## Filesystem trust boundary
+
+### Trusted roots
+
+VerifyAgent's filesystem integrity model assumes the following roots are
+operator-controlled and trusted:
+
+- `VERIFY_SANDBOX_SNAPSHOT_ROOT` — the sandbox snapshot store root, where
+  published source snapshots and composed snapshots reside.
+- `VERIFY_DEPENDENCY_ARTIFACT_ROOT` — the dependency artifact root, where
+  prebuilt, content-hash-verified offline dependency artifacts are stored.
+- `VERIFY_SANDBOX_TEMP_ROOT` — the sandbox temporary workspace root, used only
+  by the external `verify-sandbox` process.
+
+These roots must be absolute paths configured by the operator at service
+startup. They are never derived from request data, repository metadata, or
+untrusted input. The configuration readers (`readSnapshotStoreRoot`,
+`readDependencyArtifactRoot`) return `undefined` when unset, preserving the
+historical resolver behavior without publication; they do not default to
+working directories or temporary paths.
+
+### Composition lease scope
+
+The composition lease (`<storeRoot>/.locks/<composed-identity>.lock`) is a
+cooperative application-level mutex. It establishes the invariant that
+_cooperating_ VerifyAgent processes do not concurrently mutate the same
+composition staging tree and publication path. The lease:
+
+- Binds to the exact composed identity (`<sourceIdentity>-dep-<artifactHash>`),
+  so different compositions execute concurrently.
+- Lives outside every published identity directory, so it is never part of a
+  snapshot and never visible to the sandbox.
+- Uses atomic directory creation (`mkdir`), which fails with `EEXIST` on both
+  POSIX and Windows.
+- Fails closed after a bounded wait (default 30 s).
+- Is always released in a `finally` block.
+
+The lease protects against race conditions between VerifyAgent operations only.
+It does **not** protect against an arbitrary hostile process that already
+possesses the same OS identity and filesystem permissions as the VerifyAgent
+service.
+
+### Atomic staging and publication
+
+All composition mutation occurs in a uniquely named staging directory
+(`<storeRoot>/.staging-<identity>-<uuid>`) beneath the trusted snapshot root.
+The complete composed tree (source + verified dependency artifact + generated
+artifacts) is validated and content-hashed _while the lease is held_, then
+published by a single atomic `rename` to `<storeRoot>/<composedIdentity>`.
+If a concurrent composition wins the race, the loser accepts the result only
+when the published tree is byte-identical; otherwise it fails closed. A failed
+composition removes only its staging tree and never touches the final identity.
+No partially published snapshot can ever be observed by the sandbox.
+
+### Same-UID threat model limitation
+
+A hostile process that already runs with the same OS-level identity and
+filesystem permissions as the VerifyAgent service is **explicitly outside the
+filesystem integrity threat model**. Such a process can already read, modify, or
+delete any VerifyAgent-owned file or process state, including snapshot store
+contents, dependency artifacts, composition staging trees, lease directories,
+and the VerifyAgent executable itself. The application-level lease and atomic
+publication provide no defence against such a process; they are not OS-level
+isolation mechanisms.
+
+Deployments **must not** place `VERIFY_SANDBOX_SNAPSHOT_ROOT`,
+`VERIFY_DEPENDENCY_ARTIFACT_ROOT`, or `VERIFY_SANDBOX_TEMP_ROOT` in locations
+writable by untrusted identities. The operator is responsible for ensuring
+these roots are service-controlled (e.g., owned by a dedicated service account
+with no access granted to other principals). VerifyAgent does not perform
+cross-platform ownership or ACL validation; no `icacls`, `chmod`, or `setfacl`
+invocation is added to manufacture a security check, because a reliable
+cross-platform ownership check does not exist in the runtime and Windows ACL
+semantics cannot be assumed from POSIX permissions.

@@ -322,4 +322,34 @@ export function validateVerificationResult(value: VerificationResult): void {
   if (!/^\d+\.\d+\.\d+$/.test(value.resultVersion))
     fail("resultVersion must be semantic version");
   isoDate(value.createdAt, "createdAt");
+  if (value.requirementEvidence !== undefined) {
+    if (value.requirementEvidence.length > 100)
+      fail("too many requirement evidence records");
+    for (const evidence of value.requirementEvidence) {
+      identifier(evidence.id, "requirement evidence id");
+      nonEmpty(evidence.requirementText, "requirement text");
+      nonEmpty(evidence.explanation, "requirement explanation");
+      nonEmpty(evidence.source.owner, "requirement source owner");
+      nonEmpty(evidence.source.repository, "requirement source repository");
+      if (
+        !Number.isSafeInteger(evidence.source.number) ||
+        evidence.source.number <= 0
+      )
+        fail("invalid requirement source number");
+      if (evidence.matchedFiles.length > 50 || evidence.locations.length > 100)
+        fail("too much requirement evidence detail");
+      if (evidence.observedText.length > 100)
+        fail("too much observed requirement evidence");
+      for (const value of [
+        ...evidence.matchedFiles,
+        ...evidence.observedText,
+        ...evidence.locations.map((location) => location.file),
+      ]) {
+        if (value.length > 500) fail("requirement evidence value is too long");
+      }
+      if (evidence.explanation.length > 1000)
+        fail("requirement evidence explanation is too long");
+      hash(evidence.evidenceHash, "requirement evidence hash");
+    }
+  }
 }

@@ -117,6 +117,19 @@ export interface ExecutionEnvironment {
   readonly dependencyEnvironment?: DependencyEnvironment;
   readonly generatedArtifacts: readonly GeneratedArtifact[];
   readonly identityHash: string;
+  /**
+   * Batch 56C-R1 — exact opaque snapshot identity the external sandbox must
+   * resolve for this environment.
+   *
+   * When dependencies are composed into a dedicated published snapshot the
+   * sandbox identity is the composed snapshot identity (bound to the exact
+   * source identity and the exact dependency artifact content), never a
+   * source-snapshot directory that is still being composed. When absent, the
+   * historical behavior is preserved: the sandbox resolves
+   * `snapshot.sourceState.value`. This stays internal to VerifyAgent; the
+   * sandbox contract still carries one opaque `snapshot` string.
+   */
+  readonly sandboxSnapshotIdentity?: string;
 }
 
 export interface DependencyProvisioningPort {

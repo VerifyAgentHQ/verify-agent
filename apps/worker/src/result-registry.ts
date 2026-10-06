@@ -1,5 +1,7 @@
 import type { VerificationResult } from "@verify-agent/domain";
 import { validateVerificationResult } from "@verify-agent/domain";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 export const DEFAULT_MAX_VERIFICATION_RESULTS = 100;
 
@@ -29,6 +31,10 @@ export interface InMemoryVerificationResultRegistryOptions {
    * evicted first (deterministic FIFO). Must be a positive integer.
    */
   readonly maxResults?: number;
+}
+
+export interface FileVerificationResultRegistryOptions extends InMemoryVerificationResultRegistryOptions {
+  readonly filePath: string;
 }
 
 function deepFreezeResult(result: VerificationResult): VerificationResult {
@@ -192,6 +198,101 @@ export function createInMemoryVerificationResultRegistry(
       byVerificationId.clear();
       verificationIdByJobId.clear();
       verificationIdByQueueJobId.clear();
+    },
+  };
+}
+
+/** Restart-safe registry for the single-instance MVP. The file is an opaque,
+ * versioned JSON envelope and is replaced atomically after every successful
+ * store. The in-memory indexes remain the hot path and preserve the existing
+ * registry contract. */
+export function createFileVerificationResultRegistry(
+  options: FileVerificationResultRegistryOptions,
+): VerificationResultRegistry {
+  if (
+    !options ||
+    typeof options.filePath !== "string" ||
+    options.filePath.trim() === ""
+  ) {
+    throw new Error("filePath must be a non-empty string");
+  }
+  const memory = createInMemoryVerificationResultRegistry(options);
+  type Entry = { queueJobId: string; result: VerificationResult };
+  let entries: Entry[] = [];
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(options.filePath, "utf8"));
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      const raw = (parsed as { version?: unknown; entries?: unknown }).entries;
+      if (
+        (parsed as { version?: unknown }).version === 1 &&
+        Array.isArray(raw)
+      ) {
+        entries = raw.filter(
+          (entry): entry is Entry =>
+            typeof entry === "object" &&
+            entry !== null &&
+            typeof (entry as Entry).queueJobId === "string" &&
+            typeof (entry as Entry).result === "object" &&
+            (entry as Entry).result !== null,
+        );
+        for (const entry of entries) {
+          try {
+            memory.store(entry.queueJobId, entry.result);
+          } catch {
+            /* corrupt entries are ignored */
+          }
+        }
+      }
+    }
+  } catch {
+    /* first boot or an absent/corrupt store starts empty */
+  }
+
+  const persist = (): void => {
+    const snapshot: Entry[] = [];
+    for (const entry of entries) {
+      const result = memory.getByQueueJobId(entry.queueJobId);
+      if (result) snapshot.push({ queueJobId: entry.queueJobId, result });
+    }
+    mkdirSync(dirname(options.filePath), { recursive: true });
+    const temporary = `${options.filePath}.tmp`;
+    writeFileSync(
+      temporary,
+      JSON.stringify({ version: 1, entries: snapshot }, null, 2),
+      { mode: 0o600 },
+    );
+    renameSync(temporary, options.filePath);
+  };
+
+  return {
+    store(queueJobId, result) {
+      const stored = memory.store(queueJobId, result);
+      entries = entries.filter(
+        (entry) =>
+          entry.queueJobId !== queueJobId &&
+          String(entry.result.id) !== String(result.id),
+      );
+      entries.push({ queueJobId, result: stored });
+      while (
+        entries.length >
+        (options.maxResults ?? DEFAULT_MAX_VERIFICATION_RESULTS)
+      )
+        entries.shift();
+      persist();
+      return stored;
+    },
+    getByVerificationId: (id) => memory.getByVerificationId(id),
+    getByJobId: (id) => memory.getByJobId(id),
+    getByQueueJobId: (id) => memory.getByQueueJobId(id),
+    size: () => memory.size(),
+    clear: () => {
+      memory.clear();
+      entries = [];
+      persist();
     },
   };
 }

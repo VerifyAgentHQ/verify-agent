@@ -55,12 +55,18 @@ export {
 } from "./runtime.js";
 export type {
   InMemoryVerificationResultRegistryOptions,
+  FileVerificationResultRegistryOptions,
   VerificationResultRegistry,
 } from "./result-registry.js";
 export {
   DEFAULT_MAX_VERIFICATION_RESULTS,
   createInMemoryVerificationResultRegistry,
+  createFileVerificationResultRegistry,
 } from "./result-registry.js";
+export {
+  createInMemoryVerificationJobQueue,
+  type InMemoryVerificationJobQueue,
+} from "./in-memory-job-queue.js";
 
 export const workerBoundary = {
   status: "implemented-batch51",

@@ -44,24 +44,6 @@ importers:
         specifier: workspace:*
         version: link:../worker
 
-  apps/cli:
-    dependencies:
-      "@verify-agent/adapters-lang":
-        specifier: workspace:*
-        version: link:../../packages/adapters-lang
-      "@verify-agent/checks":
-        specifier: workspace:*
-        version: link:../../packages/checks
-      "@verify-agent/domain":
-        specifier: workspace:*
-        version: link:../../packages/domain
-      "@verify-agent/engine":
-        specifier: workspace:*
-        version: link:../../packages/engine
-      "@verify-agent/policy":
-        specifier: workspace:*
-        version: link:../../packages/policy
-
   apps/github-bot:
     dependencies:
       "@verify-agent/adapters-source":
@@ -120,12 +102,6 @@ importers:
       "@verify-agent/policy":
         specifier: workspace:*
         version: link:../policy
-
-  packages/goat:
-    dependencies:
-      "@verify-agent/domain":
-        specifier: workspace:*
-        version: link:../domain
 
   packages/policy:
     dependencies:

@@ -66,6 +66,15 @@ export interface VerificationPipelineInput {
   readonly executionId: string;
   readonly resultId: string;
   readonly createdAt: string;
+  /**
+   * Batch 56C-R1 — an already materialized immutable environment (source +
+   * trusted dependency artifact, atomically published). When present the
+   * pipeline consumes it as-is and performs no provisioning at all, so the
+   * trusted materialization happens exactly once per verification (Codex
+   * finding 3). `dependencyProvisioning` remains the historical explicit
+   * path for callers that own provisioning themselves.
+   */
+  readonly executionEnvironment?: ExecutionEnvironment;
   readonly dependencyProvisioning?: {
     readonly request: import("@verify-agent/domain").DependencyProvisioningRequest;
     readonly destination: string;
@@ -229,9 +238,14 @@ export function createVerificationPipeline(
           );
         return definition;
       });
-      let executionEnvironment: ExecutionEnvironment | undefined;
-      let provisioningStatus: ProvisioningStatus = "not_started";
-      if (input.dependencyProvisioning) {
+      // Batch 56C-R1 — exactly one provisioning operation per verification.
+      // A materialized environment supplied by the application service is
+      // authoritative and is never provisioned again.
+      let executionEnvironment: ExecutionEnvironment | undefined =
+        input.executionEnvironment;
+      let provisioningStatus: ProvisioningStatus =
+        executionEnvironment === undefined ? "not_started" : "ready";
+      if (executionEnvironment === undefined && input.dependencyProvisioning) {
         if (!dependencies.dependencyProvisioner)
           throw new VerificationPipelineError(
             "dependency_provisioning_failed",

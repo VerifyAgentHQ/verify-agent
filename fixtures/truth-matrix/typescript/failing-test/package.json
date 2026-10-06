@@ -1,9 +1,0 @@
-{
-  "name": "truth-failing-test-ts",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
-  }
-}

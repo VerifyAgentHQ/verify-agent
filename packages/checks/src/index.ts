@@ -23,6 +23,8 @@ export type {
 } from "./planner.js";
 export {
   createTrustedExecutionSpecRegistry,
+  maxTrustedExecutionTimeoutMs,
+  maxTrustedSpecTimeoutMs,
   trustedExecutionSpecs,
 } from "./execution-specs.js";
 export type {

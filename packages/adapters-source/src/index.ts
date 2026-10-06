@@ -71,24 +71,6 @@ export {
   createGitHubAppSourceProvider,
   createStaticGitHubInstallationResolver,
 } from "./github-app.js";
-export type {
-  GitHubCheckConclusion,
-  GitHubCheckOutput,
-  GitHubCheckPublication,
-  GitHubCheckPublisher,
-  GitHubCheckPublisherOptions,
-  PublishVerificationResultInput,
-  RenderVerificationCheckOutputInput,
-  VerificationCheckRepository,
-} from "./github-checks.js";
-export {
-  GitHubCheckPublicationError,
-  StaleVerificationResultError,
-  VERIFY_AGENT_CHECK_NAME,
-  createGitHubCheckPublisher,
-  mapVerificationStatusToCheckConclusion,
-  renderVerificationCheckOutput,
-} from "./github-checks.js";
 export type { SnapshotStorePublisherOptions } from "./snapshot-store-publisher.js";
 export {
   SnapshotStorePublicationError,

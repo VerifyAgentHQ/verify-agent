@@ -41,6 +41,8 @@ export interface DependencyArtifact {
   readonly generatedArtifactInputs: readonly string[];
   readonly availability: DependencyAvailability;
   readonly contentHash: string;
+  /** Provisioning settings used to produce this artifact. */
+  readonly provisioningConfig?: Readonly<Record<string, string>>;
   /** Hash of the materialized artifact contents. */
   readonly artifactContentHash?: string;
   /** Opaque reference resolved by the trusted artifact store. */

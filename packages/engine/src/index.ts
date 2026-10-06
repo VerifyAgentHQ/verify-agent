@@ -23,7 +23,6 @@ export type {
   ProvisioningStatus,
 } from "./interfaces.js";
 export type { GeneratedArtifact } from "@verify-agent/domain";
-export { createEngine } from "./runtime.js";
 export { DEFAULT_EXECUTION_LIMITS } from "./interfaces.js";
 export {
   createCheckExecutor,
@@ -55,6 +54,7 @@ export {
   VerificationApplicationServiceError,
 } from "./application-service.js";
 export type {
+  SnapshotDependencyMaterialization,
   VerifyRepositorySnapshotRequest,
   VerifySourceRequest,
 } from "./application-service.js";
@@ -75,11 +75,39 @@ export {
   createDependencyArtifact,
   dependencyArtifactContentHash,
   dependencyArtifactId,
+  dependencyArtifactMetadataPath,
+  artifactEntriesContentHash,
   dependencyProvisioningEvidenceInput,
+  publishArtifactDirectoryAtomically,
   readArtifactFile,
+  readDependencyArtifactMetadata,
   validateDependencyArtifact,
   validateDependencyPlatform,
+  validateDependencyProvisioningRequest,
+  writeDependencyArtifactMetadata,
 } from "./dependency-provisioning.js";
+export type { OfflineDependencyProvisionerOptions } from "./dependency-provisioning.js";
+export {
+  ComposedSnapshotStore,
+  SnapshotCompositionError,
+  SnapshotCompositionLockError,
+  acquireCompositionLease,
+  composedSnapshotIdentity,
+} from "./snapshot-composition.js";
+export type {
+  ComposedSnapshotRequest,
+  ComposedSnapshotResult,
+  ComposedSnapshotStoreDependencies,
+  CompositionLeaseOptions,
+} from "./snapshot-composition.js";
+export {
+  TRUSTED_DEPENDENCY_PLATFORM,
+  TRUSTED_NODE_TOOLCHAIN_VERSION,
+  TRUSTED_PNPM_VERSION,
+  TRUSTED_PROVISIONING_CONFIG,
+  deriveNodeDependencyIdentity,
+} from "./snapshot-dependency-materialization.js";
+export type { DependencyIdentityDerivationOptions } from "./snapshot-dependency-materialization.js";
 export {
   PrebuiltGeneratedArtifactPreparer,
   createGeneratedArtifactSet,
@@ -99,6 +127,7 @@ export {
   removeMaterializedEnvironment,
 } from "./environment-materializer.js";
 export type {
+  ExecutionEnvironmentDependencyVerification,
   ExecutionEnvironmentMaterializationRequest,
   ExecutionEnvironmentMaterializationResult,
 } from "./environment-materializer.js";
@@ -118,3 +147,11 @@ export type {
   VerificationPipelineOutput,
 } from "./pipeline.js";
 export type { DetectionContext } from "./pipeline-types.js";
+// Batch 56C — canonical trusted execution timeout helpers re-exported so
+// application entry points derive the outer transport timeout from the
+// single registry without adding a direct checks dependency.
+export {
+  maxTrustedExecutionTimeoutMs,
+  maxTrustedSpecTimeoutMs,
+  trustedExecutionSpecs,
+} from "@verify-agent/checks";
