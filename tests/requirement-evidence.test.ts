@@ -58,7 +58,7 @@ describe("Requirement Evidence milestone", () => {
       "Disable persisted checkout credentials",
     ]);
     expect(candidates[0]?.originalText).toBe(
-      "Please add `docs/verifyagent-phase6.md`",
+      "Requirement: Please add `docs/verifyagent-phase6.md`",
     );
     expect(candidates.every((item) => item.source === source)).toBe(true);
   });
@@ -84,7 +84,7 @@ describe("Requirement Evidence milestone", () => {
     })[0]!;
     expect(unsupported.status).toBe("unknown");
     expect(unsupported.evidence?.sourceText).toBe(
-      "Ensure the implementation is maintainable",
+      "Ensure the implementation is maintainable.",
     );
   });
 
@@ -94,7 +94,7 @@ describe("Requirement Evidence milestone", () => {
       changedFiles: ["docs/verifyagent-phase6.md"],
       patches: { "docs/verifyagent-phase6.md": "@@ -0,0 +1 @@\n+# Phase 6" },
     })[0]!;
-    expect(result.text).toBe("add docs/verifyagent-phase6.md");
+    expect(result.text).toBe("Add docs/verifyagent-phase6.md");
     expect(result.originalText).toBe(
       "Requirement: The PR must add `docs/verifyagent-phase6.md`.",
     );

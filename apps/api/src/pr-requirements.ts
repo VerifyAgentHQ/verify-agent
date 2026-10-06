@@ -86,7 +86,7 @@ function canonicalRequirementText(value: string): string | undefined {
     /persist-credentials\s*:\s*false/i.test(normalized)
   )
     return "Disable persisted checkout credentials";
-  return normalized;
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 export function extractRequirementCandidates(
@@ -105,11 +105,16 @@ export function extractRequirementCandidates(
       for (const clause of splitRequirementClauses(stripped)) {
         const normalized = normalizeRequirementText(clause);
         const text = canonicalRequirementText(clause);
+        const imperative =
+          /^(?:add|remove|change|modify|do not modify|don't modify|pin|disable|include|must|ensure|write|update|please|we need|the pr should|make sure)\b/i.test(
+            clause,
+          );
         if (
           text === undefined ||
-          !/^(?:add|remove|change|modify|do not modify|don't modify|pin|disable|include|must|ensure|write|update|please|we need|the pr should|make sure)\b/i.test(
-            normalized,
-          )
+          (!imperative &&
+            !/^(?:add|remove|change|modify|do not modify|don't modify|pin|disable|include|must|ensure|write|update|please|we need|the pr should|make sure)\b/i.test(
+              normalized,
+            ))
         )
           continue;
         output.push({
