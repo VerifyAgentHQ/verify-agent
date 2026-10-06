@@ -75,38 +75,48 @@ PR #11 proof:
 - 6 changed action references verified against full commit SHAs.
 - 2 checkout steps verified with `persist-credentials: false`.
 
-## CURRENT PHASE
-
 ### Phase 3 — GitHub checkpoint / synchronization
 
-Goal:
+DONE.
 
-**Get the clean working implementation and this roadmap safely committed and pushed to GitHub.**
+- Roadmap and Phase 0-2 implementation committed and pushed.
+- Local and GitHub `main` synchronized.
+- Secrets, private keys, generated artifacts, and local result stores excluded.
+- GitHub Actions formatting, typecheck, build, and test checks passed.
 
-Tasks:
+Checkpoint commits:
 
-1. Inspect `git status`.
-2. Inspect the full diff.
-3. Identify secrets/generated/local-only files.
-4. Confirm `.env`, private keys and local credentials are NOT committed.
-5. Review the changed source/test/docs files.
-6. Create an appropriate checkpoint commit.
-7. Push using the repository's normal workflow.
-8. Ensure `ROADMAP.md` is included.
-9. Confirm GitHub and local HEAD are synchronized.
-10. Run CI after the push.
-
-Do NOT start Phase 4 until this checkpoint is complete.
-
-## Future phases
+- `6d230c2` - MVP and roadmap checkpoint.
+- `11ef2ca`, `0676eb0`, `e23576b` - formatting and CI regression fixes.
 
 ### Phase 4 — Precise evidence locations
 
-Extract actual line numbers where possible, retaining patch-hunk fallback.
+DONE.
+
+- Unified diff hunks map to exact new-file line numbers where available.
+- Evidence records preserve `LEFT`/`RIGHT` diff side information.
+- Patch hunks remain available as a bounded fallback.
+- PR comments render file, line, side, or patch-hunk evidence.
+- Focused evidence/comment tests cover precise locations and fallback output.
+- GitHub Actions passed the complete Phase 4 test suite.
+
+Implementation commit: `3c42309`.
+
+## CURRENT PHASE
 
 ### Phase 5 — Expand deterministic requirement rules
 
-Add required files, forbidden files, required tests, and required text/configuration.
+Goal:
+
+**Add a small number of deterministic requirement rules that produce concrete evidence.**
+
+Immediate next action:
+
+Implement and test `required-file-changed` as the first Phase 5 rule.
+
+Do NOT start Phase 6 until Phase 5 has a real dogfood proof.
+
+## Future phases
 
 ### Phase 6 — Better requirement extraction
 
@@ -161,4 +171,4 @@ Phase 3 is complete only when the coherent Phase 0–2 implementation and this r
 
 ## CURRENT ACTION
 
-Execute Phase 3. Do not implement new product functionality until the checkpoint is complete.
+Execute Phase 5 only after reviewing this roadmap. Do not revive sandbox execution or expand the contract repository.
