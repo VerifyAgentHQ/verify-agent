@@ -348,7 +348,9 @@ function requiredFileEvidence(
   const match = text.match(
     /\b(?:add|include|create|write)\s+[`']?([^`'\s]+)[`']?/i,
   );
-  const requiredFile = match?.[1]?.replace(/\\/g, "/");
+  const requiredFile = match?.[1]
+    ?.replace(/\\/g, "/")
+    .replace(/[.,;:!?]+$/, "");
   if (!requiredFile) {
     const item = evidence(
       source,

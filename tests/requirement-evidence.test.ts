@@ -57,6 +57,19 @@ describe("Requirement Evidence milestone", () => {
       "docs/verifyagent-phase5.md",
     ]);
 
+    const punctuated = evaluatePullRequestRequirements({
+      description: "Add `docs/verifyagent-phase5-negative.md`.",
+      changedFiles: [],
+      patches: {},
+    })[0]!;
+    expect(punctuated.status).toBe("failed");
+    expect(punctuated.evidence?.requirementText).toContain(
+      "docs/verifyagent-phase5-negative.md",
+    );
+    expect(punctuated.finding).toContain(
+      "docs/verifyagent-phase5-negative.md is absent",
+    );
+
     const blocked = evaluatePullRequestRequirements({
       ...input,
       changedFiles: [],
