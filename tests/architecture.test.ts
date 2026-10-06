@@ -64,13 +64,13 @@ describe("architecture boundaries", () => {
     ]);
   });
 
-  it("does not use a fabricated zero hash in the engine placeholder", () => {
+  it("keeps the active worker runtime free of fabricated placeholder state", () => {
     const runtime = readFileSync(
-      join(repoRoot, "packages", "engine", "src", "runtime.ts"),
+      join(repoRoot, "apps", "worker", "src", "runtime.ts"),
       "utf8",
     );
     expect(runtime).not.toContain("repeat(64)");
-    expect(runtime).toContain("not implemented");
+    expect(runtime).toContain("processNext");
   });
 
   it("keeps the verification job and queue contracts provider-neutral", () => {

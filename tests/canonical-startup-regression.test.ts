@@ -16,9 +16,11 @@
  *   expected verification job is queued
  */
 
-import { createHmac, generateKeyPairSync } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startConfiguredProductionService } from "../apps/api/src/main.js";
 import { createProjectDetectionService } from "../packages/adapters-lang/src/index.js";
@@ -210,6 +212,10 @@ function configuredEnv(): NodeJS.ProcessEnv {
     GITHUB_APP_PRIVATE_KEY: APP_PRIVATE_KEY_PEM,
     GITHUB_WEBHOOK_SECRET: SECRET,
     VERIFY_INTERNAL_RESULT_TOKEN: INTERNAL_RESULT_TOKEN,
+    VERIFY_RESULT_STORE_PATH: joinPath(
+      tmpdir(),
+      `verifyagent-canonical-${randomUUID()}.json`,
+    ),
     // Ambient token must never become the publication credential.
     GITHUB_TOKEN: PERSONAL_TOKEN_SENTINEL,
   };
