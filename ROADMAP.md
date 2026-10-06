@@ -121,11 +121,20 @@ Implementation commits: `348e3ea`, `42cc30b`, `9070dfe`.
 
 ## Future phases
 
-## CURRENT PHASE
-
 ### Phase 6 — Better requirement extraction
 
-Improve pattern-based extraction while preserving original wording and provenance.
+DONE.
+
+- Extracted wrapped imperative requirements such as `Requirement: The PR must add ...`.
+- Split compound requirement clauses without losing source provenance.
+- Preserved original requirement wording alongside canonical evaluator text.
+- Retained deterministic changed-file evidence and Phase 5 verdict behavior.
+- Added focused extraction, provenance, persistence, verdict, and comment tests.
+- Positive dogfood: `StellarForgeDev/stellar-forge#15` returned PASS from the real PR body and changed-file set.
+
+Implementation commit: `d1efacd`.
+
+## CURRENT PHASE
 
 ### Phase 7 — Evidence quality
 
