@@ -2,7 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { brandId, type VerificationResult } from "@verify-agent/domain";
+import {
+  brandId,
+  type VerificationResult,
+} from "../packages/domain/src/index.js";
 import { createFileVerificationResultRegistry } from "../apps/worker/src/result-registry.js";
 import { renderMvpComment } from "../apps/api/src/github-pr-comment.js";
 import { evaluatePullRequestRequirements } from "../apps/api/src/pr-requirements.js";
