@@ -169,7 +169,7 @@ Do NOT revive sandbox execution, make Docker mandatory, restore batch suites or 
 
 ## Success criteria
 
-Phase 3 is complete only when the coherent Phase 0–2 implementation and this roadmap are committed, pushed, visible on GitHub, locally synchronized, and CI has run successfully.
+Phase 6 is complete only when deterministic extraction preserves normalized evaluation text, original source wording, provenance, unsupported UNKNOWN behavior, focused tests, and a real dogfood proof with CI green.
 
 ## Architectural decisions
 
@@ -182,7 +182,8 @@ Phase 3 is complete only when the coherent Phase 0–2 implementation and this r
 ## Dogfood proof cases
 
 - `StellarForgeDev/stellar-forge#11`: PASS with six pinned action references and two disabled checkout credential settings.
+- `StellarForgeDev/stellar-forge#15`: PASS for wrapped `Requirement: The PR must add docs/verifyagent-phase6.md` wording, with the required file proven from the changed-file set.
 
 ## CURRENT ACTION
 
-Execute Phase 6 only after reviewing this roadmap. Do not revive sandbox execution or expand the contract repository.
+Execute Phase 7 only after reviewing this roadmap. Do not revive sandbox execution or expand the contract repository.
