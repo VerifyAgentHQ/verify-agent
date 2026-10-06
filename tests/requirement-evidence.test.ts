@@ -42,6 +42,30 @@ function requirements(patchText = patch) {
 }
 
 describe("Requirement Evidence milestone", () => {
+  it("passes only when an explicitly required file is changed", () => {
+    const sourceText =
+      "Add `docs/verifyagent-phase5.md` explaining the dogfood configuration.";
+    const input = {
+      description: sourceText,
+      changedFiles: ["docs/verifyagent-phase5.md"],
+      patches: { "docs/verifyagent-phase5.md": "@@ -0,0 +1 @@\n+# Phase 5" },
+    };
+    const passed = evaluatePullRequestRequirements(input)[0]!;
+    expect(passed.status).toBe("passed");
+    expect(passed.evidence?.rule).toBe("required-file-changed");
+    expect(passed.evidence?.matchedFiles).toEqual([
+      "docs/verifyagent-phase5.md",
+    ]);
+
+    const blocked = evaluatePullRequestRequirements({
+      ...input,
+      changedFiles: [],
+      patches: {},
+    })[0]!;
+    expect(blocked.status).toBe("failed");
+    expect(blocked.finding).toContain("absent");
+  });
+
   it("splits PR #11 wording and preserves PR body provenance", () => {
     const result = requirements();
     expect(result).toHaveLength(2);

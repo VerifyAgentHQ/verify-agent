@@ -11,7 +11,9 @@ export type RequirementEvidenceSource = {
 };
 
 export type RequirementEvidenceRule =
-  "github-action-pinned" | "checkout-persist-credentials-disabled";
+  | "github-action-pinned"
+  | "checkout-persist-credentials-disabled"
+  | "required-file-changed";
 
 export type RequirementEvidenceStatus = "passed" | "failed" | "unknown";
 

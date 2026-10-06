@@ -340,6 +340,61 @@ function checkoutEvidence(
   };
 }
 
+function requiredFileEvidence(
+  input: PullRequestReviewInput,
+  source: RequirementEvidenceSource,
+  text: string,
+): RequirementResult {
+  const match = text.match(
+    /\b(?:add|include|create|write)\s+[`']?([^`'\s]+)[`']?/i,
+  );
+  const requiredFile = match?.[1]?.replace(/\\/g, "/");
+  if (!requiredFile) {
+    const item = evidence(
+      source,
+      text,
+      "required-file-changed",
+      "unknown",
+      "The required file path could not be extracted from the requirement.",
+      [],
+      [],
+      [],
+    );
+    return {
+      text,
+      status: "unknown",
+      finding: item.explanation,
+      evidence: item,
+    };
+  }
+
+  const changedFiles = input.changedFiles.map((file) =>
+    file.replace(/\\/g, "/"),
+  );
+  const matched = changedFiles.filter((file) => file === requiredFile);
+  const status = matched.length > 0 ? "passed" : "failed";
+  const explanation =
+    status === "passed"
+      ? `Required file ${requiredFile} is present in the changed-file set.`
+      : `Required file ${requiredFile} is absent from the changed-file set.`;
+  const item = evidence(
+    source,
+    text,
+    "required-file-changed",
+    status,
+    explanation,
+    matched,
+    matched.map((file) => ({ file })),
+    changedFiles,
+  );
+  return {
+    text,
+    status,
+    ...(status === "failed" ? { finding: explanation } : {}),
+    evidence: item,
+  };
+}
+
 export function evaluatePullRequestRequirements(
   input: PullRequestReviewInput,
 ): readonly RequirementResult[] {
@@ -354,6 +409,10 @@ export function evaluatePullRequestRequirements(
       lower.includes("persist-credentials")
     )
       results.push(checkoutEvidence(input, item.source, item.text));
+    else if (
+      /\b(?:add|include|create|write)\s+[`']?[^`'\s]+[`']?/i.test(item.text)
+    )
+      results.push(requiredFileEvidence(input, item.source, item.text));
     else {
       const unknown = evidence(
         item.source,
