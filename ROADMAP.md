@@ -156,7 +156,9 @@ restrictions.
 
 ## CURRENT PHASE
 
-### Phase 8 — Policy (in progress)
+### Phase 8 — Policy
+
+DONE.
 
 The first policy slice is implemented locally:
 
@@ -166,10 +168,11 @@ The first policy slice is implemented locally:
 - policy identity persisted in the durable result and rendered in comments;
 - combined jobs are not treated as multiple categories automatically.
 
-The remaining proof is a fresh dogfood with the StellarForge policy set to
+Proof completed with a fresh dogfood using the StellarForge policy set to
 `VERIFY_REQUIRED_CHECKS=Typecheck`, because its current authoritative job is
 named `lint-typecheck-build` and does not provide separate Build/Lint/Test
-check-run identities.
+check-run identities. The result was PASS and the existing PR comment was
+updated.
 
 ### Phase 9 — AI assistance
 
@@ -213,6 +216,5 @@ Phase 6 is complete only when deterministic extraction preserves normalized eval
 
 ## CURRENT ACTION
 
-Complete Phase 8 by running the configured StellarForge dogfood and recording
-the resulting policy ID/verdict. Do not revive sandbox execution or expand
-the contract repository.
+Phase 8 is complete. The next roadmap phase is Phase 9 only after owner
+review. Do not revive sandbox execution or expand the contract repository.
