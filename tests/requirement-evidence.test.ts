@@ -222,6 +222,17 @@ describe("Requirement Evidence milestone", () => {
       contentHash: "a".repeat(64),
       createdAt: "2026-01-01T00:00:00.000Z",
       requirementEvidence: evidence,
+      checkRunEvidence: [
+        {
+          id: 42,
+          name: "CI / Typecheck",
+          category: "Typecheck",
+          status: "completed",
+          conclusion: "success",
+          headSha: "a".repeat(40),
+          url: "https://github.com/StellarForgeDev/stellar-forge/actions/runs/42",
+        },
+      ],
     };
     const root = mkdtempSync(join(tmpdir(), "verifyagent-evidence-"));
     const path = join(root, "results.json");
@@ -236,6 +247,9 @@ describe("Requirement Evidence milestone", () => {
       expect(
         restarted.getByQueueJobId("queue-evidence-test")?.requirementEvidence,
       ).toEqual(evidence);
+      expect(
+        restarted.getByQueueJobId("queue-evidence-test")?.checkRunEvidence,
+      ).toMatchObject([{ id: 42, headSha: "a".repeat(40) }]);
       const body = renderMvpComment({
         commitSha: "a".repeat(40),
         resultId: String(result.id),
@@ -252,5 +266,41 @@ describe("Requirement Evidence milestone", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("retains immutable source, line, commit, and timestamp provenance", () => {
+    const result = evaluatePullRequestRequirements({
+      description: "Pin CI actions to immutable commits.",
+      requirementSources: [
+        { source, text: "Pin CI actions to immutable commits." },
+      ],
+      changedFiles: [".github/workflows/ci.yml"],
+      patches: {
+        ".github/workflows/ci.yml":
+          "@@ -1,1 +10,1 @@\n+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      },
+      commitSha: "a".repeat(40),
+      repositoryUrl: "https://github.com/StellarForgeDev/stellar-forge",
+      collectedAt: "2026-10-19T00:00:00.000Z",
+    })[0]!;
+    expect(result.evidence?.requirementId).toMatch(/^requirement-/);
+    expect(result.evidence?.source.url).toBe(
+      "https://github.com/StellarForgeDev/stellar-forge/pull/11",
+    );
+    expect(result.evidence?.locations[0]?.url).toContain(
+      "/blob/" + "a".repeat(40) + "/.github/workflows/ci.yml#L10",
+    );
+    expect(result.evidence?.commitSha).toBe("a".repeat(40));
+    expect(result.evidence?.collectedAt).toBe("2026-10-19T00:00:00.000Z");
+  });
+
+  it("returns UNKNOWN when a workflow patch has no changed action evidence", () => {
+    const result = evaluatePullRequestRequirements({
+      description: "Pin CI actions to immutable commits.",
+      changedFiles: [".github/workflows/ci.yml"],
+      patches: { ".github/workflows/ci.yml": "@@ -1,1 +1,1 @@\n+name: CI" },
+    })[0]!;
+    expect(result.status).toBe("unknown");
+    expect(result.finding).toContain("No changed GitHub Action reference");
   });
 });

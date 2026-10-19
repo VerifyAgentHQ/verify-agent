@@ -40,6 +40,7 @@ import { readGitHubWebhookSecret } from "@verify-agent/github-bot";
 import {
   createGitHubPrCommentPublisher,
   type GitHubPrCommentPublisher,
+  type MvpCheckCategory,
   type MvpReview,
 } from "./github-pr-comment.js";
 
@@ -56,7 +57,7 @@ import {
  * shared in-memory queue
  *     ↓ application-owned runtime (automatic, event-driven, sequential)
  * VerificationJobProcessor → VerificationApplicationService.verifySource()
- *     ↓ existing detection/planning/execution/evidence/policy pipeline
+ *     ↓ MVP GitHub evidence and deterministic requirement/policy evaluation
  * VerificationResult → bounded registry → protected GET
  * /verification-jobs/:queueJobId/result (internal bearer token, fail-closed)
  * ```
@@ -283,6 +284,7 @@ export function createGitHubVerificationService(
             status: mvpReview.status,
             summary,
             requirementEvidence: mvpReview.evidence,
+            checkRunEvidence: mvpReview.checkEvidence,
             contentHash: createHash("sha256")
               .update(
                 JSON.stringify({
@@ -501,6 +503,12 @@ export function createConfiguredGitHubPrCommentPublisher(
   const appConfig = readGitHubAppConfig(env);
   const apiBaseUrl = readConfiguredApiBaseUrl(env);
   const fetch = overrides?.fetch ?? globalThis.fetch;
+  const requiredCheckCategories = (env.VERIFY_REQUIRED_CHECKS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value): value is MvpCheckCategory =>
+      ["Build", "Typecheck", "Lint", "Tests"].includes(value),
+    );
   const installationResolver = createGitHubApiInstallationResolver({
     appConfig,
     ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),
@@ -517,6 +525,7 @@ export function createConfiguredGitHubPrCommentPublisher(
     installationTokenClient,
     ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),
     ...(fetch === undefined ? {} : { fetch }),
+    requiredCheckCategories,
   });
 }
 
@@ -526,7 +535,7 @@ export interface ConfiguredGitHubVerificationServiceOptions {
   /**
    * Batch 55B — composition seams for tests. Production calls with no
    * overrides: webhook secret/result token/port from `env` (default
-   * `process.env`), sandbox-backed application service, global fetch.
+   * `process.env`), MVP application service, global fetch.
    * Tests substitute a fake application service and/or stub fetch while
    * still exercising the configured publisher construction path.
    */
@@ -544,8 +553,8 @@ export interface ConfiguredGitHubVerificationServiceOptions {
  * Reuses existing environment patterns: `GITHUB_WEBHOOK_SECRET` (required,
  * fail-closed), `VERIFY_INTERNAL_RESULT_TOKEN` (optional; when absent the
  * result route stays unavailable per Batch 50 fail-closed semantics),
- * GitHub App credentials where already supported, and the legacy
- * sandbox-backed application service. The MVP comment publisher reads
+ * GitHub App credentials where already supported, and the MVP application
+ * service. The MVP comment publisher reads
  * authoritative GitHub Actions checks; it does not publish VerifyAgent-owned
  * Check Runs.
  */

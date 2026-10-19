@@ -2,6 +2,8 @@ import type {
   CheckResultId,
   EvidenceId,
   FindingId,
+  MvpCheckRunEvidence,
+  RequirementEvidence,
   PolicyDecisionId,
   VerificationStatus,
 } from "@verify-agent/domain";
@@ -29,6 +31,8 @@ export interface PublicVerificationResponse {
   readonly resultVersion: string;
   readonly contentHash: string;
   readonly createdAt: string;
+  readonly requirementEvidence?: readonly RequirementEvidence[];
+  readonly checkRunEvidence?: readonly MvpCheckRunEvidence[];
   readonly source: PublicVerifyRequest["source"];
 }
 
@@ -70,4 +74,6 @@ export interface PublicAsyncVerificationResponse {
   readonly resultVersion: string;
   readonly contentHash: string;
   readonly createdAt: string;
+  readonly requirementEvidence?: readonly RequirementEvidence[];
+  readonly checkRunEvidence?: readonly MvpCheckRunEvidence[];
 }

@@ -102,8 +102,6 @@ DONE.
 
 Implementation commit: `3c42309`.
 
-## CURRENT PHASE
-
 ### Phase 5 — Expand deterministic requirement rules
 
 DONE.
@@ -119,8 +117,6 @@ DONE.
 
 Implementation commits: `348e3ea`, `42cc30b`, `9070dfe`.
 
-## Future phases
-
 ### Phase 6 — Better requirement extraction
 
 DONE.
@@ -134,15 +130,36 @@ DONE.
 
 Implementation commit: `d1efacd`.
 
-## CURRENT PHASE
-
 ### Phase 7 — Evidence quality
 
-Improve explanations, precise locations, missing-evidence messages, and GitHub links.
+DONE locally; checkpoint pending final validation/merge.
+
+- Requirement evidence now preserves a stable requirement identifier,
+  provenance URL, immutable commit SHA, collection timestamp, exact file/line
+  URL where available, and bounded patch fallback data.
+- Evidence hashes include the bounded provenance and location payload.
+- GitHub Actions check evidence is selected deterministically by category and
+  exact head SHA, with the selected check-run identity, status, conclusion,
+  URL, and commit SHA persisted with the durable result.
+- PR comments link requirement sources, immutable file evidence, and selected
+  check-runs while rejecting malformed or credential-bearing URLs.
+- The dead legacy comment-composition branch that rendered sandbox coverage was
+  removed from the active publisher.
+- Unsupported or incomplete workflow evidence remains UNKNOWN and blocks the
+  merge-oriented verdict.
+- Focused and full active tests pass; no sandbox or Docker runtime was added.
+
+Local validation proof: focused MVP tests, typecheck, build, format, diff,
+contract, and frozen sandbox checks pass. The full Vitest suite remains
+subject to the documented Windows localhost/atomic-rename environment
+restrictions.
+
+## CURRENT PHASE
 
 ### Phase 8 — Policy
 
-Introduce repository-specific policy after evidence is reliable.
+Introduce repository-specific policy only after evidence is reliable. Keep
+evidence collection separate from policy decisions.
 
 ### Phase 9 — AI assistance
 
@@ -186,4 +203,6 @@ Phase 6 is complete only when deterministic extraction preserves normalized eval
 
 ## CURRENT ACTION
 
-Execute Phase 7 only after reviewing this roadmap. Do not revive sandbox execution or expand the contract repository.
+Complete the Phase 7 checkpoint: validate the isolated MVP composition and
+explicit check policy, record the live dogfood result, then commit and merge.
+Do not revive sandbox execution or expand the contract repository.

@@ -30,6 +30,9 @@ export type PullRequestReviewInput = {
   readonly requirementSources?: readonly RequirementSourceText[];
   readonly changedFiles: readonly string[];
   readonly patches: Readonly<Record<string, string>>;
+  readonly commitSha?: string;
+  readonly repositoryUrl?: string;
+  readonly collectedAt?: string;
 };
 
 const clean = (value: string): string => value.replace(/[`*_]/g, "").trim();
@@ -219,6 +222,7 @@ function patchLocation(
 }
 
 function evidence(
+  input: PullRequestReviewInput,
   source: RequirementEvidenceSource,
   text: string,
   rule: RequirementEvidence["rule"],
@@ -233,31 +237,68 @@ function evidence(
     .slice(0, 100)
     .map((value) => value.slice(0, 500));
   const boundedExplanation = explanation.slice(0, 1000);
+  const repositoryUrl = input.repositoryUrl?.replace(/\/+$/, "");
+  const sourceWithUrl =
+    source.url === undefined && repositoryUrl !== undefined
+      ? {
+          ...source,
+          url:
+            source.kind === "pull_request"
+              ? `${repositoryUrl}/pull/${source.number}`
+              : `${repositoryUrl}/issues/${source.number}`,
+        }
+      : source;
+  const located = locations.map((location) => ({
+    ...location,
+    ...(location.url === undefined &&
+    repositoryUrl !== undefined &&
+    input.commitSha !== undefined
+      ? {
+          url: `${repositoryUrl}/blob/${input.commitSha}/${location.file}${
+            location.startLine === undefined
+              ? ""
+              : `#L${location.startLine}${
+                  location.endLine !== undefined &&
+                  location.endLine !== location.startLine
+                    ? `-L${location.endLine}`
+                    : ""
+                }`
+          }`,
+        }
+      : {}),
+  }));
   const payload = JSON.stringify({
-    source,
+    source: sourceWithUrl,
     text,
     rule,
     status,
     boundedObserved,
     matchedFiles,
-    locations,
+    locations: located,
     sourceText,
+    commitSha: input.commitSha,
+    collectedAt: input.collectedAt,
   });
   const hash = createHash("sha256").update(payload).digest("hex");
   return {
     id: brandId<"RequirementEvidenceId">(
       `requirement-evidence-${hash.slice(0, 24)}`,
     ),
-    source,
+    source: sourceWithUrl,
     requirementText: text,
+    requirementId: `requirement-${hash.slice(0, 16)}`,
     ...(sourceText === undefined || sourceText === text ? {} : { sourceText }),
     rule,
     status,
     explanation: boundedExplanation,
     matchedFiles: matchedFiles.slice(0, 50),
-    locations: locations.slice(0, 100),
+    locations: located.slice(0, 100),
     observedText: boundedObserved,
     evidenceHash: hash,
+    ...(input.commitSha === undefined ? {} : { commitSha: input.commitSha }),
+    ...(input.collectedAt === undefined
+      ? {}
+      : { collectedAt: input.collectedAt }),
   };
 }
 
@@ -270,6 +311,7 @@ function actionEvidence(
   const files = workflowFiles(input);
   if (files.length === 0 || files.some((file) => !input.patches[file])) {
     const item = evidence(
+      input,
       source,
       text,
       "github-action-pinned",
@@ -302,12 +344,20 @@ function actionEvidence(
       if (!/^[0-9a-f]{40}$/i.test(match[2]!)) unpinned ??= reference;
     }
   }
-  const status = unpinned === undefined ? "passed" : "failed";
+  const status =
+    observed.length === 0
+      ? "unknown"
+      : unpinned === undefined
+        ? "passed"
+        : "failed";
   const explanation =
-    unpinned === undefined
-      ? `All ${observed.length} relevant changed uses: references are pinned to full commit SHAs.`
-      : `${unpinned} is not pinned to a full 40-character commit SHA.`;
+    status === "unknown"
+      ? "No changed GitHub Action reference could be proven from the workflow patch."
+      : unpinned === undefined
+        ? `All ${observed.length} relevant changed uses: references are pinned to full commit SHAs.`
+        : `${unpinned} is not pinned to a full 40-character commit SHA.`;
   const item = evidence(
+    input,
     source,
     text,
     "github-action-pinned",
@@ -322,7 +372,7 @@ function actionEvidence(
     text,
     ...(originalText === undefined ? {} : { originalText }),
     status,
-    ...(status === "failed" ? { finding: explanation } : {}),
+    ...(status !== "passed" ? { finding: explanation } : {}),
     evidence: item,
   };
 }
@@ -336,6 +386,7 @@ function checkoutEvidence(
   const files = workflowFiles(input);
   if (files.length === 0 || files.some((file) => !input.patches[file])) {
     const item = evidence(
+      input,
       source,
       text,
       "checkout-persist-credentials-disabled",
@@ -392,6 +443,7 @@ function checkoutEvidence(
         ? "No actions/checkout step could be proven from the workflow patch."
         : "At least one actions/checkout step does not set persist-credentials: false.";
   const item = evidence(
+    input,
     source,
     text,
     "checkout-persist-credentials-disabled",
@@ -406,7 +458,7 @@ function checkoutEvidence(
     text,
     ...(originalText === undefined ? {} : { originalText }),
     status,
-    ...(status === "failed" ? { finding: explanation } : {}),
+    ...(status !== "passed" ? { finding: explanation } : {}),
     evidence: item,
   };
 }
@@ -425,6 +477,7 @@ function requiredFileEvidence(
     .replace(/[.,;:!?]+$/, "");
   if (!requiredFile) {
     const item = evidence(
+      input,
       source,
       text,
       "required-file-changed",
@@ -454,6 +507,7 @@ function requiredFileEvidence(
       ? `Required file ${requiredFile} is present in the changed-file set.`
       : `Required file ${requiredFile} is absent from the changed-file set.`;
   const item = evidence(
+    input,
     source,
     text,
     "required-file-changed",
@@ -468,7 +522,7 @@ function requiredFileEvidence(
     text,
     ...(originalText === undefined ? {} : { originalText }),
     status,
-    ...(status === "failed" ? { finding: explanation } : {}),
+    ...(status !== "passed" ? { finding: explanation } : {}),
     evidence: item,
   };
 }
@@ -499,6 +553,7 @@ export function evaluatePullRequestRequirements(
       );
     else {
       const unknown = evidence(
+        input,
         item.source,
         item.text,
         "github-action-pinned",

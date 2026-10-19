@@ -1,6 +1,6 @@
 # VerifyAgent
 
-VerifyAgent is an evidence-first verification engine for software changes. It replaces vague "looks good" judgments with reproducible checks, traceable evidence, explicit policy, and machine-readable verification results.
+VerifyAgent is a GitHub pull-request verification bot for explicit, machine-checkable requirements. It replaces vague "looks good" judgments with reproducible evidence, explicit policy, and machine-readable verification results.
 
 ```text
 Software change / Pull Request
@@ -15,13 +15,10 @@ Exact revision acquisition
 Project detection
         |
         v
-Verification planning
+PR/issue requirements + exact diff
         |
         v
-Checks / isolated execution
-        |
-        v
-Evidence collection
+GitHub Actions check-run evidence
         |
         v
 Policy evaluation
@@ -53,14 +50,12 @@ The following capabilities are fully implemented and tested:
 - GitHub webhook authentication (HMAC-SHA256 with timing-safe comparison)
 - GitHub App authentication (RS256 JWT, installation token acquisition)
 - Exact SHA source acquisition (commit/tree/blob fetching at exact SHA)
-- Dependency provisioning architecture (offline, deterministic, content-addressed)
-- External verify-sandbox integration (subprocess transport, Docker-backed execution)
-- Deterministic verification (detection, planning, execution, evidence, policy)
-- Immutable VerificationResult (content-hashed, evidence-backed)
+- Deterministic requirement evidence (file, diff, line, commit, and source links)
+- Immutable durable MVP result (content-hashed, evidence-backed)
 - Protected result observation (provider-neutral VerificationResultReader port, internal bearer token)
 - GitHub Actions check-run consumption for authoritative CI evidence
 - Real GitHub dogfood (single-process webhook → queue → requirement review → PR comment)
-- Sandbox lifecycle ownership hardening (atomic composition, TOCTOU integrity, trust boundaries)
+- Frozen sandbox and contract repositories retained separately for future work
 
 ## Current Product Status
 
@@ -78,11 +73,11 @@ verify-agent/
     worker/                 Job processor boundary
   packages/
     domain/                 Branded IDs, validation, immutability
-    engine/                 Pipeline, execution, aggregation, sandbox transport
-    checks/                 Check definitions, planner, execution specs
-    policy/                 Deterministic policy evaluator (5 rules)
-    ai/                     Provider-neutral reasoning boundary (no SDK)
-    adapters-lang/          TypeScript + Rust project detection
+    engine/                 Frozen legacy execution pipeline
+    checks/                 Retained legacy check definitions
+    policy/                 Retained policy model
+    ai/                     Optional future explanation boundary (no SDK)
+    adapters-lang/          Retained project detection abstractions
     adapters-source/        GitHub API source provider, App JWT auth
   tests/                    17 descriptive tests for the active boundary and retained models
   docs/                     Architecture, readiness audit, ADRs
@@ -98,8 +93,8 @@ future evaluation and compatibility work.
 - **Replay protection**: TTL-based reserve/commit/rollback prevents webhook replay at the application boundary.
 - **Source identity**: The PR head SHA is extracted, validated as 40-char hex, and used as the immutable source snapshot identity.
 - **CI authority**: GitHub Actions is authoritative for build, typecheck, lint, and test results. VerifyAgent consumes those results and does not execute ordinary CI commands itself.
-- **Fail-closed transport**: `SubprocessSandboxTransport` uses `shell: false`, no host environment inheritance, bounded I/O, timeout enforcement, and JSON-lines protocol validation.
-- **Provenance tracking**: Execution source (`real`, `simulated`, `fixture`) is immutable per transport instance and propagated through the entire evidence chain.
+- **No active code execution**: the GitHub PR MVP does not execute repository code or depend on Docker/sandbox infrastructure.
+- **Frozen boundary**: sandbox security claims apply only to the separate frozen sandbox project and are not claims about the active PR verifier.
 
 The authenticated `POST /webhook` route is the GitHub production entrypoint.
 The synchronous `POST /verify` route is an unauthenticated internal/manual API
@@ -175,12 +170,11 @@ One create-or-update GitHub PR comment
 
 ## Supported ecosystems
 
-| Ecosystem               | Checks                             | Commands                                                    |
-| ----------------------- | ---------------------------------- | ----------------------------------------------------------- |
-| TypeScript / JavaScript | typecheck, lint, test, build       | `tsc --noEmit`, `eslint .`, `vitest run`, `tsc -b`          |
-| Rust / Soroban          | check, test, clippy, contract-test | `cargo check`, `cargo test`, `cargo clippy`, `soroban test` |
+| Ecosystem         | Evidence consumed                  | Authority                 |
+| ----------------- | ---------------------------------- | ------------------------- |
+| TypeScript / Node | PR diff and GitHub Actions results | Repository GitHub Actions |
 
-The architecture supports adding new ecosystems by implementing a `ProjectDetector` and execution specs without changing the domain, engine, checks, or policy packages.
+Additional ecosystems are future work and are not part of the active MVP.
 
 ## Productization Roadmap
 

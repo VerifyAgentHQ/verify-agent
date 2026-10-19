@@ -1,8 +1,96 @@
 import { describe, expect, it } from "vitest";
-import { renderMvpComment } from "../apps/api/src/github-pr-comment.js";
+import {
+  evaluateMvpCheckRuns,
+  renderMvpComment,
+} from "../apps/api/src/github-pr-comment.js";
 import { evaluatePullRequestRequirements } from "../apps/api/src/pr-requirements.js";
 
 describe("MVP comment composition", () => {
+  const sha = "a".repeat(40);
+
+  it("requires explicitly configured CI categories and rejects wrong-SHA runs", () => {
+    const result = evaluateMvpCheckRuns({
+      commitSha: sha,
+      requiredCategories: ["Build", "Typecheck", "Tests"],
+      runs: [
+        {
+          id: 1,
+          name: "CI / Typecheck",
+          status: "completed",
+          conclusion: "success",
+          head_sha: sha,
+        },
+        {
+          id: 2,
+          name: "CI / Build",
+          status: "completed",
+          conclusion: "success",
+          head_sha: "b".repeat(40),
+        },
+        {
+          id: 3,
+          name: "CI / Tests",
+          status: "completed",
+          conclusion: "success",
+          head_sha: sha,
+        },
+      ],
+    });
+    expect(result.state).toBe("PENDING");
+    expect(result.lines).toContain("⏳ Build (MISSING)");
+    expect(result.evidence.map((item) => item.category)).toEqual([
+      "Tests",
+      "Typecheck",
+    ]);
+  });
+
+  it("classifies failed, pending, and successful authoritative checks", () => {
+    const base = [
+      {
+        id: 1,
+        name: "Build",
+        status: "completed",
+        conclusion: "success",
+        head_sha: sha,
+      },
+      {
+        id: 2,
+        name: "Typecheck",
+        status: "completed",
+        conclusion: "failure",
+        head_sha: sha,
+      },
+      { id: 3, name: "Tests", status: "queued", head_sha: sha },
+    ];
+    expect(evaluateMvpCheckRuns({ commitSha: sha, runs: base }).state).toBe(
+      "PENDING",
+    );
+    expect(
+      evaluateMvpCheckRuns({ commitSha: sha, runs: base.slice(0, 2) }).state,
+    ).toBe("FAIL");
+    expect(
+      evaluateMvpCheckRuns({
+        commitSha: sha,
+        runs: [
+          {
+            id: 4,
+            name: "Build",
+            status: "completed",
+            conclusion: "success",
+            head_sha: sha,
+          },
+          {
+            id: 5,
+            name: "Typecheck",
+            status: "completed",
+            conclusion: "success",
+            head_sha: sha,
+          },
+        ],
+      }).state,
+    ).toBe("PASS");
+  });
+
   it("does not render legacy sandbox check failures in an MVP PASS", () => {
     const body = renderMvpComment({
       commitSha: "a".repeat(40),
@@ -135,5 +223,94 @@ describe("MVP comment composition", () => {
       "Rule: the required file appears in the changed-file set",
     );
     expect(body).not.toContain("persist-credentials");
+  });
+
+  it("renders immutable requirement and evidence links", () => {
+    const body = renderMvpComment({
+      commitSha: "f".repeat(40),
+      resultId: "mvp-result-links",
+      policyId: "mvp-policy-links",
+      verdict: "pass",
+      checks: [
+        "✅ Build ([check](https://github.com/example/repo/actions/runs/1))",
+      ],
+      requirements: [],
+      findings: [],
+      evidence: [
+        {
+          id: "requirement-evidence-links" as never,
+          requirementId: "requirement-links",
+          source: {
+            kind: "pull_request",
+            owner: "example",
+            repository: "repo",
+            number: 1,
+            field: "body",
+            url: "https://github.com/example/repo/pull/1",
+          },
+          requirementText: "Add the required workflow change",
+          rule: "required-file-changed",
+          status: "passed",
+          explanation: "The required file is changed.",
+          matchedFiles: [".github/workflows/ci.yml"],
+          locations: [
+            {
+              file: ".github/workflows/ci.yml",
+              side: "RIGHT",
+              startLine: 10,
+              url: "https://github.com/example/repo/blob/ffffffffffffffffffffffffffffffffffffffff/.github/workflows/ci.yml#L10",
+            },
+          ],
+          observedText: [".github/workflows/ci.yml"],
+          evidenceHash: "a".repeat(64),
+          commitSha: "f".repeat(40),
+          collectedAt: "2026-10-19T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(body).toContain(
+      "[requirement source](https://github.com/example/repo/pull/1)",
+    );
+    expect(body).toContain(
+      "https://github.com/example/repo/blob/ffffffffffffffffffffffffffffffffffffffff/.github/workflows/ci.yml#L10",
+    );
+    expect(body).toContain(
+      "✅ Build ([check](https://github.com/example/repo/actions/runs/1))",
+    );
+  });
+
+  it("does not render malformed evidence URLs as Markdown links", () => {
+    const body = renderMvpComment({
+      commitSha: "a".repeat(40),
+      resultId: "mvp-result-safe-links",
+      policyId: "mvp-policy-safe-links",
+      verdict: "blocked",
+      checks: [],
+      requirements: [],
+      findings: [],
+      evidence: [
+        {
+          id: "requirement-evidence-safe-links" as never,
+          source: {
+            kind: "pull_request",
+            owner: "example",
+            repository: "repo",
+            number: 1,
+            field: "body",
+            url: "javascript:alert(1)",
+          },
+          requirementText: "Unsafe link",
+          rule: "required-file-changed",
+          status: "unknown",
+          explanation: "Evidence unavailable.",
+          matchedFiles: [],
+          locations: [],
+          observedText: [],
+          evidenceHash: "b".repeat(64),
+        },
+      ],
+    });
+    expect(body).toContain("⚠️ Unsafe link");
+    expect(body).not.toContain("javascript:");
   });
 });

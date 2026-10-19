@@ -1,4 +1,7 @@
-import type { VerificationResult } from "@verify-agent/domain";
+import type {
+  MvpCheckRunEvidence,
+  VerificationResult,
+} from "@verify-agent/domain";
 import type { RequirementEvidence } from "@verify-agent/domain";
 import type {
   GitHubAppConfig,
@@ -14,12 +17,25 @@ import { calculateMvpVerdict } from "./mvp-verdict.js";
 
 export const VERIFY_AGENT_COMMENT_MARKER = "<!-- verifyagent:pr-comment -->";
 
+function safeMarkdownUrl(value: string | undefined): string | undefined {
+  if (value === undefined || /[\r\n\s]/.test(value)) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    if (url.username || url.password) return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 export interface MvpReview {
   readonly ci: "PASS" | "FAIL" | "PENDING" | "ERROR";
   readonly checks: readonly string[];
   readonly requirements: readonly RequirementResult[];
   readonly findings: readonly string[];
   readonly evidence: readonly RequirementEvidence[];
+  readonly checkEvidence: readonly MvpCheckRunEvidence[];
   readonly status: "pass" | "blocked";
 }
 
@@ -32,6 +48,115 @@ export interface MvpCommentInput {
   readonly requirements: readonly RequirementResult[];
   readonly findings: readonly string[];
   readonly evidence?: readonly RequirementEvidence[];
+}
+
+export type MvpCheckCategory = "Build" | "Typecheck" | "Lint" | "Tests";
+
+export type GitHubCheckRunInput = {
+  readonly id?: unknown;
+  readonly name?: unknown;
+  readonly status?: unknown;
+  readonly conclusion?: unknown;
+  readonly html_url?: unknown;
+  readonly head_sha?: unknown;
+};
+
+export type MvpCiEvaluation = {
+  readonly state: "PASS" | "FAIL" | "PENDING" | "ERROR";
+  readonly lines: readonly string[];
+  readonly evidence: readonly MvpCheckRunEvidence[];
+};
+
+function checkCategory(name: string): MvpCheckCategory | undefined {
+  const lower = name.toLowerCase();
+  if (lower.includes("type") && lower.includes("check")) return "Typecheck";
+  if (lower.includes("lint")) return "Lint";
+  if (lower.includes("test")) return "Tests";
+  if (lower.includes("build")) return "Build";
+  return undefined;
+}
+
+export function evaluateMvpCheckRuns(input: {
+  readonly commitSha: string;
+  readonly runs: readonly GitHubCheckRunInput[];
+  readonly requiredCategories?: readonly MvpCheckCategory[];
+}): MvpCiEvaluation {
+  const selected = new Map<MvpCheckCategory, GitHubCheckRunInput>();
+  for (const run of input.runs) {
+    if (
+      typeof run.head_sha === "string" &&
+      run.head_sha.toLowerCase() !== input.commitSha.toLowerCase()
+    )
+      continue;
+    const name = typeof run.name === "string" ? run.name : "";
+    const category = checkCategory(name);
+    if (category === undefined) continue;
+    const prior = selected.get(category);
+    const id = typeof run.id === "number" ? run.id : 0;
+    const priorId = typeof prior?.id === "number" ? prior.id : -1;
+    if (prior === undefined || id >= priorId) selected.set(category, run);
+  }
+
+  const required = [...new Set(input.requiredCategories ?? [])];
+  const missing = required.filter((category) => !selected.has(category));
+  const categories = [...selected.keys()].sort();
+  const evidence: MvpCheckRunEvidence[] = categories.flatMap((category) => {
+    const run = selected.get(category)!;
+    if (
+      typeof run.id !== "number" ||
+      !Number.isSafeInteger(run.id) ||
+      run.id <= 0
+    )
+      return [];
+    const name = typeof run.name === "string" ? run.name : "unnamed check";
+    const url =
+      typeof run.html_url === "string"
+        ? safeMarkdownUrl(run.html_url)
+        : undefined;
+    return [
+      {
+        id: run.id,
+        name,
+        category,
+        status: typeof run.status === "string" ? run.status : "unknown",
+        ...(typeof run.conclusion === "string"
+          ? { conclusion: run.conclusion }
+          : {}),
+        headSha: input.commitSha,
+        ...(url === undefined ? {} : { url }),
+      },
+    ];
+  });
+
+  const lines = [
+    ...categories.map((category) => {
+      const run = selected.get(category)!;
+      const url =
+        typeof run.html_url === "string"
+          ? safeMarkdownUrl(run.html_url)
+          : undefined;
+      const link = url === undefined ? "" : ` ([check](${url}))`;
+      if (run.status !== "completed") return `⏳ ${category} (PENDING)${link}`;
+      return run.conclusion === "success"
+        ? `✅ ${category}${link}`
+        : `❌ ${category} (${String(run.conclusion ?? "ERROR").toUpperCase()})${link}`;
+    }),
+    ...missing.map((category) => `⏳ ${category} (MISSING)`),
+  ];
+  if (lines.length === 0)
+    return {
+      state: "PENDING",
+      lines: ["⏳ CI/check results pending (no relevant checks found)"],
+      evidence,
+    };
+  if (
+    missing.length > 0 ||
+    [...selected.values()].some((run) => run.status !== "completed")
+  )
+    return { state: "PENDING", lines, evidence };
+  if ([...selected.values()].some((run) => run.conclusion !== "success"))
+    return { state: "FAIL", lines, evidence };
+  return { state: "PASS", lines, evidence };
 }
 
 function renderRequirementEvidence(
@@ -51,7 +176,9 @@ function renderRequirementEvidence(
                   ? `-${location.endLine}`
                   : ""
               }${location.side === undefined ? "" : ` (${location.side})`}`;
-        return `\`${location.file}${line}\``;
+        const label = `\`${location.file}${line}\``;
+        const url = safeMarkdownUrl(location.url);
+        return url === undefined ? label : `[${label}](${url})`;
       })
       .filter((location, index, all) => all.indexOf(location) === index)
       .slice(0, 10);
@@ -61,7 +188,10 @@ function renderRequirementEvidence(
   return evidence.flatMap((item) => {
     const icon =
       item.status === "passed" ? "✅" : item.status === "failed" ? "❌" : "⚠️";
-    const lines = [`${icon} ${item.requirementText}`];
+    const sourceUrl = safeMarkdownUrl(item.source.url);
+    const source =
+      sourceUrl === undefined ? "" : ` ([requirement source](${sourceUrl}))`;
+    const lines = [`${icon} ${item.requirementText}${source}`];
     if (item.status === "unknown") {
       lines.push(`Evidence unavailable: ${item.explanation}`);
     } else {
@@ -165,65 +295,6 @@ function bodyFor(
       item.evidence === undefined ? [] : [item.evidence],
     ),
   });
-  /* Legacy sandbox fields below are intentionally unreachable and retained
-   * only in the old result model; they must never compose the MVP comment. */
-  /* istanbul ignore next */
-  const pass = calculateMvpVerdict({ ci: ci.state, requirements }) === "pass";
-  const checkLines = input.result.coverage.verified.map((name) => `✅ ${name}`);
-  const failed = input.result.coverage.partial.concat(
-    input.result.coverage.unsupported,
-  );
-  checkLines.push(...failed.map((name) => `❌ ${name}`));
-  if (checkLines.length === 0)
-    checkLines.push(pass ? "✅ Verification" : "❌ Verification");
-  return [
-    VERIFY_AGENT_COMMENT_MARKER,
-    "## 🤖 VerifyAgent",
-    `**Verdict: ${pass ? "✅ PASS" : "❌ BLOCKED"}**`,
-    "",
-    "### Checks",
-    ...checkLines,
-    ...ci.lines,
-    "",
-    "### Issue requirements",
-    ...(requirements.length === 0
-      ? [
-          "No explicit, machine-checkable requirements found in the PR/issue text.",
-        ]
-      : requirements.map(
-          (item, index) =>
-            `${item.status === "passed" ? "✅" : item.status === "failed" ? "❌" : "⚠️"} Requirement ${index + 1}: ${item.text}`,
-        )),
-    pass
-      ? "✅ Deterministic repository policy"
-      : "❌ Deterministic repository policy",
-    "",
-    "### Findings",
-    ...requirements.flatMap((item) =>
-      item.finding ? [`- ${item.finding}`] : [],
-    ),
-    ...(input.result.findingReferences.length > 0
-      ? [
-          `- ${input.result.findingReferences.length} deterministic finding(s) recorded in the verification result.`,
-        ]
-      : []),
-    ...(requirements.every((item) => !item.finding) &&
-    input.result.findingReferences.length === 0
-      ? ["None."]
-      : []),
-    "",
-    "### What to fix",
-    ...(pass
-      ? ["No action required."]
-      : requirements
-          .flatMap((item) => (item.finding ? [`- ${item.finding}`] : []))
-          .concat(input.result.summary)),
-    "",
-    "### Verification",
-    `Commit: \`${input.commitSha.slice(0, 12)}\``,
-    `Result: \`${String(input.result.id)}\``,
-    `Policy: \`${String(input.result.policyDecision)}\``,
-  ].join("\n");
 }
 
 export function createGitHubPrCommentPublisher(options: {
@@ -232,6 +303,7 @@ export function createGitHubPrCommentPublisher(options: {
   installationTokenClient: GitHubAppInstallationTokenClient;
   apiBaseUrl?: string;
   fetch?: typeof globalThis.fetch;
+  requiredCheckCategories?: readonly MvpCheckCategory[];
 }): GitHubPrCommentPublisher {
   const fetchFn = options.fetch ?? globalThis.fetch;
   const base = (options.apiBaseUrl ?? "https://api.github.com").replace(
@@ -286,7 +358,12 @@ export function createGitHubPrCommentPublisher(options: {
       let ci: {
         state: "PASS" | "FAIL" | "PENDING" | "ERROR";
         lines: string[];
-      } = { state: "ERROR", lines: ["⚠️ CI/check results unavailable"] };
+        evidence: MvpCheckRunEvidence[];
+      } = {
+        state: "ERROR",
+        lines: ["⚠️ CI/check results unavailable"],
+        evidence: [],
+      };
       try {
         const data = await request(
           token,
@@ -297,39 +374,104 @@ export function createGitHubPrCommentPublisher(options: {
           name?: unknown;
           status?: unknown;
           conclusion?: unknown;
+          id?: unknown;
+          html_url?: unknown;
+          head_sha?: unknown;
         }> = Array.isArray(data?.check_runs) ? data.check_runs : [];
         const relevantRuns = runs.filter((run) => {
+          if (
+            typeof run?.head_sha === "string" &&
+            run.head_sha.toLowerCase() !== input.commitSha.toLowerCase()
+          )
+            return false;
           const name =
             typeof run?.name === "string" ? run.name.toLowerCase() : "";
           return /build|type[- ]?check|lint|test/.test(name);
         });
-        const lines = relevantRuns.map((run) => {
+        const categoryFor = (rawName: string): string => {
+          const lowerName = rawName.toLowerCase();
+          return lowerName.includes("type") && lowerName.includes("check")
+            ? "Typecheck"
+            : lowerName.includes("lint")
+              ? "Lint"
+              : lowerName.includes("test")
+                ? "Tests"
+                : "Build";
+        };
+        const selected = new Map<string, (typeof relevantRuns)[number]>();
+        for (const run of relevantRuns) {
           const rawName =
             typeof run?.name === "string" ? run.name : "unnamed check";
-          const lowerName = rawName.toLowerCase();
-          const name =
-            lowerName.includes("type") && lowerName.includes("check")
-              ? "Typecheck"
-              : lowerName.includes("lint")
-                ? "Lint"
-                : lowerName.includes("test")
-                  ? "Tests"
-                  : "Build";
-          if (run?.status !== "completed") return `⏳ ${name} (PENDING)`;
-          return run?.conclusion === "success"
-            ? `✅ ${name}`
-            : `❌ ${name} (${String(run?.conclusion ?? "ERROR").toUpperCase()})`;
+          const category = categoryFor(rawName);
+          const prior = selected.get(category);
+          const id = typeof run.id === "number" ? run.id : 0;
+          const priorId =
+            typeof prior?.id === "number" ? prior.id : Number.MAX_SAFE_INTEGER;
+          if (prior === undefined || id >= priorId) selected.set(category, run);
+        }
+        const checkEvidence: MvpCheckRunEvidence[] = [
+          ...selected.entries(),
+        ].flatMap(([category, run]) => {
+          if (
+            typeof run.id !== "number" ||
+            !Number.isSafeInteger(run.id) ||
+            run.id <= 0
+          )
+            return [];
+          return [
+            {
+              id: run.id,
+              name: typeof run.name === "string" ? run.name : "unnamed check",
+              category: category as MvpCheckRunEvidence["category"],
+              status: typeof run.status === "string" ? run.status : "unknown",
+              ...(typeof run.conclusion === "string"
+                ? { conclusion: run.conclusion }
+                : {}),
+              headSha: input.commitSha,
+              ...(typeof run.html_url === "string"
+                ? (() => {
+                    const url = safeMarkdownUrl(run.html_url);
+                    return url === undefined ? {} : { url };
+                  })()
+                : {}),
+            },
+          ];
         });
-        if (relevantRuns.length === 0)
+        const lines = [...selected.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([category, run]) => {
+            const checkUrl =
+              typeof run?.html_url === "string"
+                ? safeMarkdownUrl(run.html_url)
+                : undefined;
+            const link =
+              checkUrl === undefined ? "" : ` ([check](${checkUrl}))`;
+            if (run?.status !== "completed")
+              return `⏳ ${category} (PENDING)${link}`;
+            return run?.conclusion === "success"
+              ? `✅ ${category}${link}`
+              : `❌ ${category} (${String(run?.conclusion ?? "ERROR").toUpperCase()})${link}`;
+          });
+        const missing = (options.requiredCheckCategories ?? []).filter(
+          (category) => !selected.has(category),
+        );
+        lines.push(...missing.map((category) => `⏳ ${category} (MISSING)`));
+        if (selected.size === 0)
           ci = {
             state: "PENDING",
             lines: ["⏳ CI/check results pending (no completed checks found)"],
+            evidence: [],
           };
-        else if (relevantRuns.some((run) => run?.status !== "completed"))
-          ci = { state: "PENDING", lines };
-        else if (relevantRuns.some((run) => run?.conclusion !== "success"))
-          ci = { state: "FAIL", lines };
-        else ci = { state: "PASS", lines };
+        else if (
+          missing.length > 0 ||
+          [...selected.values()].some((run) => run?.status !== "completed")
+        )
+          ci = { state: "PENDING", lines, evidence: checkEvidence };
+        else if (
+          [...selected.values()].some((run) => run?.conclusion !== "success")
+        )
+          ci = { state: "FAIL", lines, evidence: checkEvidence };
+        else ci = { state: "PASS", lines, evidence: checkEvidence };
       } catch {
         // A missing/unavailable check is never represented as a pass.
       }
@@ -422,6 +564,9 @@ export function createGitHubPrCommentPublisher(options: {
           requirementSources: descriptions,
           changedFiles,
           patches,
+          commitSha: input.commitSha,
+          repositoryUrl: `https://github.com/${input.owner}/${input.repository}`,
+          collectedAt: new Date().toISOString(),
         });
       } catch {
         // The comment still reports the deterministic CI result if review data is unavailable.
@@ -436,6 +581,7 @@ export function createGitHubPrCommentPublisher(options: {
         evidence: requirements.flatMap((item) =>
           item.evidence === undefined ? [] : [item.evidence],
         ),
+        checkEvidence: ci.evidence,
         status: calculateMvpVerdict({ ci: ci.state, requirements }),
       };
       try {

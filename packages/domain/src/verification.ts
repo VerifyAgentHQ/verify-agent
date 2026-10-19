@@ -48,6 +48,16 @@ export interface VerificationJob {
 export type VerificationStatus =
   "pass" | "needs_review" | "needs_changes" | "blocked" | "partial" | "error";
 
+export type MvpCheckRunEvidence = {
+  readonly id: number;
+  readonly name: string;
+  readonly category: "Build" | "Typecheck" | "Lint" | "Tests";
+  readonly status: string;
+  readonly conclusion?: string;
+  readonly headSha: string;
+  readonly url?: string;
+};
+
 export interface VerificationResult {
   readonly id: VerificationId;
   readonly requestId: VerificationRequestId;
@@ -67,6 +77,7 @@ export interface VerificationResult {
   readonly contentHash: string;
   readonly createdAt: string;
   readonly requirementEvidence?: readonly RequirementEvidence[];
+  readonly checkRunEvidence?: readonly MvpCheckRunEvidence[];
 }
 
 export interface PublicVerificationTarget {

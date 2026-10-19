@@ -5,9 +5,28 @@
 > result -> one PR comment. The sandbox-backed execution architecture described
 > below is frozen/legacy infrastructure, not the authority for this MVP.
 
+## Active MVP boundary
+
+The active production composition is deliberately smaller than the historical
+verification engine:
+
+```text
+GitHub webhook -> queue/worker -> GitHub App/source access
+  -> PR/issue/diff/check-run evidence -> deterministic requirements
+  -> PASS / FAIL / UNKNOWN -> durable result -> one PR comment
+```
+
+It does not execute repository code, invoke Docker, or depend on the frozen
+sandbox. GitHub Actions remains authoritative for build, test, lint, and
+typecheck. The sections below that describe engine execution, dependency
+provisioning, or sandbox transport are retained as historical/future boundary
+documentation and are not active MVP behavior.
+
 ## Purpose
 
-VerifyAgent is an evidence-first verification platform for software changes. The product consumes public contract semantics from `verify-contracts`, communicates with the isolated execution boundary in `verify-sandbox`, and keeps its internal semantic model separate from public wire formats.
+VerifyAgent is an evidence-first GitHub PR verification bot. The product keeps
+its internal semantic model separate from public wire formats and retains the
+contract/sandbox repositories as frozen sibling projects for future work.
 
 ## Layering
 

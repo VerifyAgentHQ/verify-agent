@@ -10,32 +10,7 @@ import type {
   VerificationResultReader,
 } from "@verify-agent/domain";
 import { isValidVerificationQueueJobId } from "@verify-agent/domain";
-import {
-  DEFAULT_EXECUTION_LIMITS,
-  ExecutionEnvironmentMaterializer,
-  createCheckExecutor,
-  createSandboxExecutorFromTransport,
-  SubprocessSandboxTransport,
-  createVerificationPipeline,
-  OfflineDependencyProvisioner,
-  VerificationApplicationService,
-  maxTrustedExecutionTimeoutMs,
-} from "@verify-agent/engine";
-import { createProjectDetectionService } from "@verify-agent/adapters-lang";
-import {
-  InvalidSourceReferenceError,
-  type SourceResolver,
-  createGitHubApiInstallationResolver,
-  createGitHubApiSourceProvider,
-  createGitHubAppInstallationTokenClient,
-  createGitHubAppSourceProvider,
-  createGitHubSourceResolver,
-  createSnapshotStorePublisher,
-  readGitHubAppConfig,
-  readGitHubToken,
-  readSnapshotStoreRoot,
-  selectGitHubSourceAuthKind,
-} from "@verify-agent/adapters-source";
+import { InvalidSourceReferenceError } from "@verify-agent/adapters-source";
 import type {
   PublicAsyncVerificationResponse,
   PublicVerifyRequest,
@@ -103,6 +78,8 @@ function adaptResult(
     resultVersion: result.resultVersion,
     contentHash: result.contentHash,
     createdAt: result.createdAt,
+    requirementEvidence: result.requirementEvidence,
+    checkRunEvidence: result.checkRunEvidence,
     source,
   };
 }
@@ -210,6 +187,8 @@ function adaptAsyncResult(
     resultVersion: result.resultVersion,
     contentHash: result.contentHash,
     createdAt: result.createdAt,
+    requirementEvidence: result.requirementEvidence,
+    checkRunEvidence: result.checkRunEvidence,
   };
 }
 
@@ -372,26 +351,10 @@ function readPort(value: string | undefined): number {
  * timeout constants: the default comes from `DEFAULT_EXECUTION_LIMITS`,
  * the maximum from the registry, and only the margin lives here.
  */
-export const SANDBOX_TRANSPORT_CLEANUP_MARGIN_MS = 30_000;
-/** Alias for the default inner deadline (single source: engine limits). */
-export const SANDBOX_EXECUTION_TIMEOUT_MS = DEFAULT_EXECUTION_LIMITS.timeoutMs;
-/** Canonical maximum trusted inner deadline (registry + default fallback). */
-export const MAX_TRUSTED_EXECUTION_TIMEOUT_MS = maxTrustedExecutionTimeoutMs(
-  DEFAULT_EXECUTION_LIMITS.timeoutMs,
-);
 /**
  * Canonical maximum `resourceLimits.timeoutMs` the external sandbox backend
  * accepts (verify-sandbox `MAX_TIMEOUT_MS = 60 * 60 * 1000`).
  */
-export const MAX_BACKEND_SANDBOX_TIMEOUT_MS = 3_600_000;
-
-/** Raised when a trusted timeout configuration cannot be honored. */
-export class SandboxTimeoutConfigurationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SandboxTimeoutConfigurationError";
-  }
-}
 
 /**
  * Batch 56C-R1 — derived-timeout invariant.
@@ -405,288 +368,11 @@ export class SandboxTimeoutConfigurationError extends Error {
  * clear internal configuration error. It is never silently capped, because a
  * silent cap could terminate a trusted check before its requested timeout.
  */
-export function deriveSandboxTransportTimeoutMs(
-  maxTrustedTimeoutMs: number,
-  cleanupMarginMs: number,
-  backendMaxTimeoutMs: number = MAX_BACKEND_SANDBOX_TIMEOUT_MS,
-): number {
-  const entries = [
-    [maxTrustedTimeoutMs, "maximum trusted execution timeout"],
-    [cleanupMarginMs, "cleanup margin"],
-    [backendMaxTimeoutMs, "backend maximum timeout"],
-  ] as const;
-  for (const [value, name] of entries) {
-    if (!Number.isSafeInteger(value) || value < 1) {
-      throw new SandboxTimeoutConfigurationError(
-        `${name} must be a positive safe integer`,
-      );
-    }
-  }
-  const derived = maxTrustedTimeoutMs + cleanupMarginMs;
-  if (!Number.isSafeInteger(derived)) {
-    throw new SandboxTimeoutConfigurationError(
-      "derived sandbox transport timeout is not a safe integer",
-    );
-  }
-  if (derived > backendMaxTimeoutMs) {
-    throw new SandboxTimeoutConfigurationError(
-      `derived sandbox transport timeout ${derived}ms exceeds the backend maximum of ${backendMaxTimeoutMs}ms`,
-    );
-  }
-  return derived;
-}
-
-export const SANDBOX_TRANSPORT_REQUEST_TIMEOUT_MS =
-  deriveSandboxTransportTimeoutMs(
-    MAX_TRUSTED_EXECUTION_TIMEOUT_MS,
-    SANDBOX_TRANSPORT_CLEANUP_MARGIN_MS,
-  );
-
 export function createConfiguredApplicationService(
   env: NodeJS.ProcessEnv = process.env,
 ): VerificationApplicationServiceType {
   void env;
   return createMvpVerificationApplicationService();
-}
-
-function createLegacyConfiguredApplicationService(
-  env: NodeJS.ProcessEnv = process.env,
-): VerificationApplicationService {
-  const executable = env.VERIFY_SANDBOX_PROCESS;
-  if (!executable) {
-    throw new Error("VERIFY_SANDBOX_PROCESS must be configured");
-  }
-  const transport = new SubprocessSandboxTransport({
-    executable,
-    environment: readSandboxProcessEnvironment(env),
-    startupTimeoutMs: 5_000,
-    requestTimeoutMs: SANDBOX_TRANSPORT_REQUEST_TIMEOUT_MS,
-    maxMessageBytes: 1_048_576,
-    maxStderrBytes: 64 * 1024,
-  });
-  const dependencyProvisioner = createConfiguredDependencyProvisioner(env);
-  const pipeline = createVerificationPipeline({
-    detector: createProjectDetectionService(),
-    executor: createCheckExecutor(
-      createSandboxExecutorFromTransport(transport),
-    ),
-    ...(dependencyProvisioner === undefined ? {} : { dependencyProvisioner }),
-  });
-  const sourceResolver = createConfiguredSourceResolver(env);
-  // Batch 56C-R1 — production composition (Codex findings 1-3):
-  //
-  // ```text
-  // GitHub PR → exact source SHA → immutable published source snapshot →
-  // trusted artifact metadata (artifactContentHash) →
-  // OfflineDependencyProvisioner → composition staging → validated →
-  // atomically published composed snapshot
-  // (<root>/<sourceState.value>-dep-<artifactContentHash>) →
-  // SubprocessSandboxTransport → verify-sandbox → Docker
-  // ```
-  //
-  // The composed snapshot is published atomically under its own opaque
-  // identity (bound to the exact source identity and the exact dependency
-  // artifact content), so the contract is unchanged (`snapshot` stays the
-  // opaque identity, `artifactPolicy` stays `"none"`, `networkPolicy` stays
-  // `"none"`) and the immutable source snapshot is never mutated. The
-  // pipeline consumes the materialized environment and never provisions
-  // again, so provisioning happens exactly once per verification. History is
-  // preserved when either root is absent: no provisioner, no materializer, no
-  // silent host `node_modules`, no silent install.
-  const materialization = createConfiguredSnapshotMaterialization(
-    env,
-    dependencyProvisioner,
-  );
-  return materialization === undefined
-    ? new VerificationApplicationService(pipeline, sourceResolver)
-    : new VerificationApplicationService(
-        pipeline,
-        sourceResolver,
-        materialization,
-      );
-}
-
-/**
- * Batch 56C — snapshot-dependency materialization wiring.
- *
- * Requires BOTH operator roots: the dependency-artifact store
- * (`VERIFY_DEPENDENCY_ARTIFACT_ROOT`) and the sandbox snapshot store
- * (`VERIFY_SANDBOX_SNAPSHOT_ROOT`, same value forwarded to the sandbox
- * process). Returns `undefined` when either is absent so historical
- * behavior is preserved. The shared provisioner instance serves both the
- * pipeline (execution identity) and the materializer (workspace
- * composition); both invoke the copy-only provisioner, never a package
- * manager.
- */
-export function createConfiguredSnapshotMaterialization(
-  env: NodeJS.ProcessEnv = process.env,
-  provisioner?: OfflineDependencyProvisioner,
-):
-  | {
-      readonly snapshotStoreRoot: string;
-      readonly dependencyArtifactRoot: string;
-      readonly dependencyProvisioner: OfflineDependencyProvisioner;
-      readonly materializer: ExecutionEnvironmentMaterializer;
-    }
-  | undefined {
-  const artifactRoot = readDependencyArtifactRoot(env);
-  const snapshotStoreRoot = readSnapshotStoreRoot(env);
-  if (artifactRoot === undefined || snapshotStoreRoot === undefined) {
-    return undefined;
-  }
-  const dependencyProvisioner =
-    provisioner ?? createConfiguredDependencyProvisioner(env);
-  if (dependencyProvisioner === undefined) return undefined;
-  return {
-    snapshotStoreRoot,
-    dependencyArtifactRoot: artifactRoot,
-    dependencyProvisioner,
-    materializer: new ExecutionEnvironmentMaterializer({
-      dependencyProvisioner,
-    }),
-  };
-}
-
-/**
- * Batch 56B — optional trusted dependency-artifact store.
- *
- * When `VERIFY_DEPENDENCY_ARTIFACT_ROOT` is set to an absolute directory,
- * the production pipeline is given the existing offline copy-only
- * provisioner (`OfflineDependencyProvisioner`) bound to the Linux amd64
- * runner platform. When unset, the historical behavior is preserved: the
- * pipeline has no provisioner and provisioning requests fail closed with
- * `dependency_provisioning_failed`.
- *
- * The trusted artifact itself is built separately with the existing
- * `PnpmDependencyArtifactBuilder` in a Linux amd64 environment
- * (Node 24.19.0, pnpm 11.21.0) via `pnpm install --frozen-lockfile
- * --ignore-scripts`. Runtime provisioning here never runs a package
- * manager, lifecycle hook, script, or network operation; it only copies
- * the prebuilt content-addressed artifact. See
- * `docs/VERIFICATION-PIPELINE.md` (Batch 11 boundary) and
- * `docs/decisions/0005-platform-bound-dependency-artifacts.md`.
- */
-export function readDependencyArtifactRoot(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
-  const raw = env.VERIFY_DEPENDENCY_ARTIFACT_ROOT;
-  if (typeof raw !== "string" || raw.trim().length === 0) return undefined;
-  return raw.trim();
-}
-
-export function createConfiguredDependencyProvisioner(
-  env: NodeJS.ProcessEnv = process.env,
-): OfflineDependencyProvisioner | undefined {
-  const root = readDependencyArtifactRoot(env);
-  if (root === undefined) return undefined;
-  // Batch 56C-R1 — production artifacts must carry a trusted content hash;
-  // a directory that merely matches the expected artifact ID is not enough.
-  return new OfflineDependencyProvisioner(
-    root,
-    {
-      operatingSystem: "linux",
-      architecture: "amd64",
-    },
-    { requireArtifactContentHash: true },
-  );
-}
-
-/**
- * Batch 54 — minimal explicit environment for the external verify-sandbox
- * process. The transport never inherits the host environment; only these
- * established operator-configured keys are forwarded, and only when set.
- * No credentials (GitHub tokens, webhook secrets, result tokens) are ever
- * included: the sandbox materializes published snapshots and needs no
- * acquisition credentials.
- */
-const SANDBOX_PROCESS_ENV_KEYS = [
-  "VERIFY_SANDBOX_SNAPSHOT_ROOT",
-  "VERIFY_SANDBOX_DOCKER_EXECUTABLE",
-  "VERIFY_SANDBOX_DOCKER_HOST",
-  "VERIFY_SANDBOX_SYSTEM_ROOT",
-  "VERIFY_SANDBOX_TEMP_ROOT",
-] as const;
-
-export function readSandboxProcessEnvironment(
-  env: NodeJS.ProcessEnv = process.env,
-): Record<string, string> {
-  const forwarded: Record<string, string> = {};
-  for (const key of SANDBOX_PROCESS_ENV_KEYS) {
-    const value = env[key];
-    if (typeof value === "string" && value.length > 0) {
-      forwarded[key] = value;
-    }
-  }
-  return forwarded;
-}
-
-function createDefaultSourceResolver(): SourceResolver {
-  return {
-    async resolveSnapshot(source) {
-      throw new InvalidSourceReferenceError(
-        `source not resolvable: ${source.id}`,
-      );
-    },
-  };
-}
-
-/**
- * Batch 54A — configured GitHub source authentication.
- *
- * - Complete GitHub App configuration → GitHub App provider (an ambient
- *   `GITHUB_TOKEN` never overrides it).
- * - Partial App configuration (exactly one of ID/key) → fail closed via
- *   the default resolver; never a silent token fallback.
- * - No App configuration → token provider only with the explicit
- *   `GITHUB_SOURCE_AUTH_MODE=token` opt-in plus a `GITHUB_TOKEN`;
- *   otherwise fail closed.
- *
- * Exported as a composition seam for focused configuration tests; normal
- * startup uses `createConfiguredApplicationService()`.
- */
-export function createConfiguredSourceResolver(
-  env: NodeJS.ProcessEnv = process.env,
-): SourceResolver {
-  const authKind = selectGitHubSourceAuthKind(env);
-  let base: SourceResolver;
-  if (authKind === "app") {
-    const appConfig = readGitHubAppConfig(env);
-    const apiBaseUrl =
-      typeof env.GITHUB_API_BASE_URL === "string" &&
-      env.GITHUB_API_BASE_URL.trim().length > 0
-        ? env.GITHUB_API_BASE_URL.trim()
-        : undefined;
-    const installationResolver = createGitHubApiInstallationResolver({
-      appConfig,
-      ...(apiBaseUrl ? { apiBaseUrl } : {}),
-    });
-    const installationTokenClient = createGitHubAppInstallationTokenClient({
-      appConfig,
-      ...(apiBaseUrl ? { apiBaseUrl } : {}),
-    });
-    const provider = createGitHubAppSourceProvider({
-      installationResolver,
-      installationTokenClient,
-      ...(apiBaseUrl ? { apiBaseUrl } : {}),
-    });
-    base = createGitHubSourceResolver(provider);
-  } else if (authKind === "token") {
-    const token = readGitHubToken(env);
-    base =
-      token === undefined
-        ? createDefaultSourceResolver()
-        : createGitHubSourceResolver(createGitHubApiSourceProvider({ token }));
-  } else {
-    base = createDefaultSourceResolver();
-  }
-  // Batch 54 — publish exact acquired bytes under the exact commit SHA so
-  // the external sandbox materializes precisely the verified revision.
-  // Without a configured store root the historical resolver behavior is
-  // preserved unchanged.
-  const snapshotStoreRoot = readSnapshotStoreRoot(env);
-  return snapshotStoreRoot === undefined
-    ? base
-    : createSnapshotStorePublisher(base, { snapshotStoreRoot });
 }
 
 /**

@@ -52,6 +52,17 @@ const isoDate = (value: string, name: string): void => {
   )
     fail(`${name} must be an ISO date-time with timezone`);
 };
+const safeHttpUrl = (value: string, name: string): void => {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:")
+      fail(`${name} must be an HTTP URL`);
+    if (url.username || url.password)
+      fail(`${name} must not contain credentials`);
+  } catch {
+    fail(`${name} must be a valid URL`);
+  }
+};
 
 export function normalizePath(path: string): string {
   const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "");
@@ -327,6 +338,8 @@ export function validateVerificationResult(value: VerificationResult): void {
       fail("too many requirement evidence records");
     for (const evidence of value.requirementEvidence) {
       identifier(evidence.id, "requirement evidence id");
+      if (evidence.requirementId !== undefined)
+        identifier(evidence.requirementId, "requirement id");
       nonEmpty(evidence.requirementText, "requirement text");
       nonEmpty(evidence.explanation, "requirement explanation");
       nonEmpty(evidence.source.owner, "requirement source owner");
@@ -350,6 +363,46 @@ export function validateVerificationResult(value: VerificationResult): void {
       if (evidence.explanation.length > 1000)
         fail("requirement evidence explanation is too long");
       hash(evidence.evidenceHash, "requirement evidence hash");
+      if (evidence.source.url !== undefined)
+        safeHttpUrl(evidence.source.url, "requirement source URL");
+      for (const location of evidence.locations) {
+        if (location.url !== undefined)
+          safeHttpUrl(location.url, "requirement evidence URL");
+        if (
+          location.startLine !== undefined &&
+          (!Number.isSafeInteger(location.startLine) || location.startLine < 1)
+        )
+          fail("invalid requirement evidence start line");
+        if (
+          location.endLine !== undefined &&
+          (!Number.isSafeInteger(location.endLine) || location.endLine < 1)
+        )
+          fail("invalid requirement evidence end line");
+      }
+      if (
+        evidence.commitSha !== undefined &&
+        !/^[A-Fa-f0-9]{40}$/.test(evidence.commitSha)
+      )
+        fail("requirement evidence commitSha must be a full SHA");
+      if (evidence.collectedAt !== undefined)
+        isoDate(evidence.collectedAt, "requirement evidence collectedAt");
+    }
+  }
+  if (value.checkRunEvidence !== undefined) {
+    if (value.checkRunEvidence.length > 100)
+      fail("too many check-run evidence records");
+    for (const check of value.checkRunEvidence) {
+      if (!Number.isSafeInteger(check.id) || check.id <= 0)
+        fail("invalid check-run id");
+      nonEmpty(check.name, "check-run name");
+      nonEmpty(check.status, "check-run status");
+      if (!/^[A-Fa-f0-9]{40}$/.test(check.headSha))
+        fail("check-run headSha must be a full SHA");
+      if (check.conclusion !== undefined)
+        nonEmpty(check.conclusion, "check-run conclusion");
+      if (check.url !== undefined) safeHttpUrl(check.url, "check-run URL");
+      if (!["Build", "Typecheck", "Lint", "Tests"].includes(check.category))
+        fail("invalid check-run category");
     }
   }
 }

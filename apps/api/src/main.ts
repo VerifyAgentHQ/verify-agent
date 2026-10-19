@@ -20,8 +20,8 @@ import {
  * - deterministic PR requirement evaluation
  * - one create-or-update GitHub PR comment
  *
- * The older sandbox-backed execution pipeline remains available as frozen
- * infrastructure but is not authoritative for the current MVP verdict.
+ * The older sandbox-backed execution pipeline remains frozen infrastructure
+ * outside this active composition and is not authoritative for the MVP.
  * - startup/shutdown lifecycle
  */
 export async function startConfiguredProductionService(
