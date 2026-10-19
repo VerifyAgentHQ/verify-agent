@@ -100,6 +100,23 @@ The authenticated `POST /webhook` route is the GitHub production entrypoint.
 The synchronous `POST /verify` route is an unauthenticated internal/manual API
 for controlled use and is not intended for public production exposure.
 
+### CI policy configuration
+
+The `VERIFY_REQUIRED_CHECKS` environment variable defines the repository's
+required GitHub check categories as a comma-separated list. If it is absent,
+the fail-closed default is `Build,Typecheck,Lint,Tests`:
+
+```text
+VERIFY_REQUIRED_CHECKS=Typecheck
+```
+
+Only categories explicitly listed are required. A missing or wrong-SHA check
+is `PENDING`, never `PASS`. A combined GitHub job may be mapped to one
+category only when the repository policy intentionally makes that mapping;
+VerifyAgent does not claim separate Build, Lint, or Tests evidence from a
+combined job automatically. The policy identifier and version are persisted
+with the MVP result and rendered in the PR comment.
+
 The sandbox is not yet represented as a production-grade arbitrary-code multi-tenant isolation guarantee. Docker backend limitations are documented in the threat model.
 
 ## Quickstart

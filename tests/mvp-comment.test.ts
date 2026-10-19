@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createMvpPolicy,
   evaluateMvpCheckRuns,
   renderMvpComment,
 } from "../apps/api/src/github-pr-comment.js";
@@ -7,6 +8,27 @@ import { evaluatePullRequestRequirements } from "../apps/api/src/pr-requirements
 
 describe("MVP comment composition", () => {
   const sha = "a".repeat(40);
+
+  it("uses an explicit repository policy for a combined authoritative check", () => {
+    const policy = createMvpPolicy(["Typecheck"]);
+    const result = evaluateMvpCheckRuns({
+      commitSha: sha,
+      requiredCategories: policy.requiredCheckCategories,
+      runs: [
+        {
+          id: 42,
+          name: "lint-typecheck-build",
+          status: "completed",
+          conclusion: "success",
+          head_sha: sha,
+        },
+      ],
+    });
+    expect(result.state).toBe("PASS");
+    expect(result.lines).toEqual(["✅ Typecheck"]);
+    expect(policy.version).toBe("mvp-ci-requirements.v1");
+    expect(policy.id).toMatch(/^mvp-policy-[0-9a-f]{16}$/);
+  });
 
   it("requires explicitly configured CI categories and rejects wrong-SHA runs", () => {
     const result = evaluateMvpCheckRuns({
@@ -138,6 +160,20 @@ describe("MVP comment composition", () => {
     expect(body).toContain("MVP policy: `mvp-policy-2`");
     expect(body).not.toContain("mvp-aaaaaaaaaaaa");
     expect(body).not.toContain("mvp-policy-aaaaaaaaaaaa");
+  });
+
+  it("renders the explicit policy version when supplied", () => {
+    const body = renderMvpComment({
+      commitSha: "1".repeat(40),
+      resultId: "mvp-result-policy",
+      policyId: "mvp-policy-policy",
+      policyVersion: "mvp-ci-requirements.v1",
+      verdict: "pass",
+      checks: ["✅ Typecheck"],
+      requirements: [],
+      findings: [],
+    });
+    expect(body).toContain("Policy version: `mvp-ci-requirements.v1`");
   });
 
   it("renders only MVP findings for a BLOCKED verdict", () => {

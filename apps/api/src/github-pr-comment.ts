@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   MvpCheckRunEvidence,
   VerificationResult,
@@ -37,6 +38,8 @@ export interface MvpReview {
   readonly evidence: readonly RequirementEvidence[];
   readonly checkEvidence: readonly MvpCheckRunEvidence[];
   readonly status: "pass" | "blocked";
+  readonly policyId: string;
+  readonly policyVersion: string;
 }
 
 export interface MvpCommentInput {
@@ -48,9 +51,36 @@ export interface MvpCommentInput {
   readonly requirements: readonly RequirementResult[];
   readonly findings: readonly string[];
   readonly evidence?: readonly RequirementEvidence[];
+  readonly policyVersion?: string;
 }
 
 export type MvpCheckCategory = "Build" | "Typecheck" | "Lint" | "Tests";
+
+export const DEFAULT_MVP_REQUIRED_CHECK_CATEGORIES: readonly MvpCheckCategory[] =
+  ["Build", "Typecheck", "Lint", "Tests"];
+
+export const MVP_POLICY_VERSION = "mvp-ci-requirements.v1";
+
+export interface MvpPolicy {
+  readonly id: string;
+  readonly version: string;
+  readonly requiredCheckCategories: readonly MvpCheckCategory[];
+}
+
+export function createMvpPolicy(
+  requiredCheckCategories: readonly MvpCheckCategory[],
+): MvpPolicy {
+  const categories = [...new Set(requiredCheckCategories)].sort();
+  const fingerprint = createHash("sha256")
+    .update(`${MVP_POLICY_VERSION}\n${categories.join(",")}`)
+    .digest("hex")
+    .slice(0, 16);
+  return {
+    id: `mvp-policy-${fingerprint}`,
+    version: MVP_POLICY_VERSION,
+    requiredCheckCategories: categories,
+  };
+}
 
 export type GitHubCheckRunInput = {
   readonly id?: unknown;
@@ -261,6 +291,9 @@ export function renderMvpComment(input: MvpCommentInput): string {
     `Commit: \`${input.commitSha.slice(0, 12)}\``,
     `MVP result: \`${input.resultId}\``,
     `MVP policy: \`${input.policyId}\``,
+    ...(input.policyVersion === undefined
+      ? []
+      : [`Policy version: \`${input.policyVersion}\``]),
   ].join("\n");
 }
 
@@ -276,15 +309,20 @@ export interface GitHubPrCommentPublisher {
 
 function bodyFor(
   input: Parameters<GitHubPrCommentPublisher["publish"]>[0],
-  ci: { state: "PASS" | "FAIL" | "PENDING" | "ERROR"; lines: string[] },
+  ci: {
+    state: "PASS" | "FAIL" | "PENDING" | "ERROR";
+    lines: readonly string[];
+  },
   requirements: readonly RequirementResult[],
+  policyId: string,
+  policyVersion: string,
 ): string {
   const legacyPass =
     calculateMvpVerdict({ ci: ci.state, requirements }) === "pass";
   return renderMvpComment({
     commitSha: input.commitSha,
     resultId: String(input.result.id),
-    policyId: String(input.result.policyDecision),
+    policyId,
     verdict: legacyPass ? "pass" : "blocked",
     checks: [...new Set(ci.lines)],
     requirements,
@@ -294,6 +332,7 @@ function bodyFor(
     evidence: requirements.flatMap((item) =>
       item.evidence === undefined ? [] : [item.evidence],
     ),
+    policyVersion,
   });
 }
 
@@ -306,6 +345,7 @@ export function createGitHubPrCommentPublisher(options: {
   requiredCheckCategories?: readonly MvpCheckCategory[];
 }): GitHubPrCommentPublisher {
   const fetchFn = options.fetch ?? globalThis.fetch;
+  const policy = createMvpPolicy(options.requiredCheckCategories ?? []);
   const base = (options.apiBaseUrl ?? "https://api.github.com").replace(
     /\/+$/,
     "",
@@ -355,11 +395,7 @@ export function createGitHubPrCommentPublisher(options: {
         )
       ).token;
       const path = `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repository)}/issues/${input.pullRequestNumber}/comments`;
-      let ci: {
-        state: "PASS" | "FAIL" | "PENDING" | "ERROR";
-        lines: string[];
-        evidence: MvpCheckRunEvidence[];
-      } = {
+      let ci: MvpCiEvaluation = {
         state: "ERROR",
         lines: ["⚠️ CI/check results unavailable"],
         evidence: [],
@@ -378,100 +414,11 @@ export function createGitHubPrCommentPublisher(options: {
           html_url?: unknown;
           head_sha?: unknown;
         }> = Array.isArray(data?.check_runs) ? data.check_runs : [];
-        const relevantRuns = runs.filter((run) => {
-          if (
-            typeof run?.head_sha === "string" &&
-            run.head_sha.toLowerCase() !== input.commitSha.toLowerCase()
-          )
-            return false;
-          const name =
-            typeof run?.name === "string" ? run.name.toLowerCase() : "";
-          return /build|type[- ]?check|lint|test/.test(name);
+        ci = evaluateMvpCheckRuns({
+          commitSha: input.commitSha,
+          runs,
+          requiredCategories: policy.requiredCheckCategories,
         });
-        const categoryFor = (rawName: string): string => {
-          const lowerName = rawName.toLowerCase();
-          return lowerName.includes("type") && lowerName.includes("check")
-            ? "Typecheck"
-            : lowerName.includes("lint")
-              ? "Lint"
-              : lowerName.includes("test")
-                ? "Tests"
-                : "Build";
-        };
-        const selected = new Map<string, (typeof relevantRuns)[number]>();
-        for (const run of relevantRuns) {
-          const rawName =
-            typeof run?.name === "string" ? run.name : "unnamed check";
-          const category = categoryFor(rawName);
-          const prior = selected.get(category);
-          const id = typeof run.id === "number" ? run.id : 0;
-          const priorId =
-            typeof prior?.id === "number" ? prior.id : Number.MAX_SAFE_INTEGER;
-          if (prior === undefined || id >= priorId) selected.set(category, run);
-        }
-        const checkEvidence: MvpCheckRunEvidence[] = [
-          ...selected.entries(),
-        ].flatMap(([category, run]) => {
-          if (
-            typeof run.id !== "number" ||
-            !Number.isSafeInteger(run.id) ||
-            run.id <= 0
-          )
-            return [];
-          return [
-            {
-              id: run.id,
-              name: typeof run.name === "string" ? run.name : "unnamed check",
-              category: category as MvpCheckRunEvidence["category"],
-              status: typeof run.status === "string" ? run.status : "unknown",
-              ...(typeof run.conclusion === "string"
-                ? { conclusion: run.conclusion }
-                : {}),
-              headSha: input.commitSha,
-              ...(typeof run.html_url === "string"
-                ? (() => {
-                    const url = safeMarkdownUrl(run.html_url);
-                    return url === undefined ? {} : { url };
-                  })()
-                : {}),
-            },
-          ];
-        });
-        const lines = [...selected.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([category, run]) => {
-            const checkUrl =
-              typeof run?.html_url === "string"
-                ? safeMarkdownUrl(run.html_url)
-                : undefined;
-            const link =
-              checkUrl === undefined ? "" : ` ([check](${checkUrl}))`;
-            if (run?.status !== "completed")
-              return `⏳ ${category} (PENDING)${link}`;
-            return run?.conclusion === "success"
-              ? `✅ ${category}${link}`
-              : `❌ ${category} (${String(run?.conclusion ?? "ERROR").toUpperCase()})${link}`;
-          });
-        const missing = (options.requiredCheckCategories ?? []).filter(
-          (category) => !selected.has(category),
-        );
-        lines.push(...missing.map((category) => `⏳ ${category} (MISSING)`));
-        if (selected.size === 0)
-          ci = {
-            state: "PENDING",
-            lines: ["⏳ CI/check results pending (no completed checks found)"],
-            evidence: [],
-          };
-        else if (
-          missing.length > 0 ||
-          [...selected.values()].some((run) => run?.status !== "completed")
-        )
-          ci = { state: "PENDING", lines, evidence: checkEvidence };
-        else if (
-          [...selected.values()].some((run) => run?.conclusion !== "success")
-        )
-          ci = { state: "FAIL", lines, evidence: checkEvidence };
-        else ci = { state: "PASS", lines, evidence: checkEvidence };
       } catch {
         // A missing/unavailable check is never represented as a pass.
       }
@@ -583,6 +530,8 @@ export function createGitHubPrCommentPublisher(options: {
         ),
         checkEvidence: ci.evidence,
         status: calculateMvpVerdict({ ci: ci.state, requirements }),
+        policyId: policy.id,
+        policyVersion: policy.version,
       };
       try {
         const comments = await request(token, "GET", `${path}?per_page=100`);
@@ -593,7 +542,9 @@ export function createGitHubPrCommentPublisher(options: {
                 comment.body.includes(VERIFY_AGENT_COMMENT_MARKER),
             )
           : undefined;
-        const body = { body: bodyFor(input, ci, requirements) };
+        const body = {
+          body: bodyFor(input, ci, requirements, policy.id, policy.version),
+        };
         if (existing && typeof existing.id === "number") {
           await request(
             token,

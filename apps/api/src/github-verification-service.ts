@@ -5,7 +5,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createHash } from "node:crypto";
-import type { VerificationResultReader } from "@verify-agent/domain";
+import { brandId, type VerificationResultReader } from "@verify-agent/domain";
 import type { MvpVerificationApplicationService as VerificationApplicationServiceType } from "./mvp-application-service.js";
 import {
   createGitHubVerificationOrchestrator,
@@ -39,6 +39,7 @@ import {
 import { readGitHubWebhookSecret } from "@verify-agent/github-bot";
 import {
   createGitHubPrCommentPublisher,
+  DEFAULT_MVP_REQUIRED_CHECK_CATEGORIES,
   type GitHubPrCommentPublisher,
   type MvpCheckCategory,
   type MvpReview,
@@ -283,6 +284,7 @@ export function createGitHubVerificationService(
             ...outcome.result,
             status: mvpReview.status,
             summary,
+            policyDecision: brandId<"PolicyDecisionId">(mvpReview.policyId),
             requirementEvidence: mvpReview.evidence,
             checkRunEvidence: mvpReview.checkEvidence,
             contentHash: createHash("sha256")
@@ -503,12 +505,20 @@ export function createConfiguredGitHubPrCommentPublisher(
   const appConfig = readGitHubAppConfig(env);
   const apiBaseUrl = readConfiguredApiBaseUrl(env);
   const fetch = overrides?.fetch ?? globalThis.fetch;
-  const requiredCheckCategories = (env.VERIFY_REQUIRED_CHECKS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value): value is MvpCheckCategory =>
-      ["Build", "Typecheck", "Lint", "Tests"].includes(value),
-    );
+  const configuredRequiredCheckCategories = [
+    ...new Set(
+      (env.VERIFY_REQUIRED_CHECKS ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value): value is MvpCheckCategory =>
+          ["Build", "Typecheck", "Lint", "Tests"].includes(value),
+        ),
+    ),
+  ];
+  const requiredCheckCategories =
+    env.VERIFY_REQUIRED_CHECKS === undefined
+      ? DEFAULT_MVP_REQUIRED_CHECK_CATEGORIES
+      : configuredRequiredCheckCategories;
   const installationResolver = createGitHubApiInstallationResolver({
     appConfig,
     ...(apiBaseUrl === undefined ? {} : { apiBaseUrl }),

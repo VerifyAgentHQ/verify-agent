@@ -156,10 +156,20 @@ restrictions.
 
 ## CURRENT PHASE
 
-### Phase 8 — Policy
+### Phase 8 — Policy (in progress)
 
-Introduce repository-specific policy only after evidence is reliable. Keep
-evidence collection separate from policy decisions.
+The first policy slice is implemented locally:
+
+- explicit `VERIFY_REQUIRED_CHECKS` repository configuration;
+- deterministic missing/wrong-SHA check handling;
+- stable policy ID and version derived from required categories;
+- policy identity persisted in the durable result and rendered in comments;
+- combined jobs are not treated as multiple categories automatically.
+
+The remaining proof is a fresh dogfood with the StellarForge policy set to
+`VERIFY_REQUIRED_CHECKS=Typecheck`, because its current authoritative job is
+named `lint-typecheck-build` and does not provide separate Build/Lint/Test
+check-run identities.
 
 ### Phase 9 — AI assistance
 
@@ -203,7 +213,6 @@ Phase 6 is complete only when deterministic extraction preserves normalized eval
 
 ## CURRENT ACTION
 
-Phase 7 checkpoint is merged. The next product phase may begin only after
-owner review of the live-dogfood credential-source issue recorded in the
-checkpoint report. Do not revive sandbox execution or expand the contract
-repository.
+Complete Phase 8 by running the configured StellarForge dogfood and recording
+the resulting policy ID/verdict. Do not revive sandbox execution or expand
+the contract repository.
