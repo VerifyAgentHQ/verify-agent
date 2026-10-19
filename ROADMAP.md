@@ -132,7 +132,7 @@ Implementation commit: `d1efacd`.
 
 ### Phase 7 — Evidence quality
 
-DONE locally; checkpoint pending final validation/merge.
+DONE and merged to `main`.
 
 - Requirement evidence now preserves a stable requirement identifier,
   provenance URL, immutable commit SHA, collection timestamp, exact file/line
@@ -203,6 +203,7 @@ Phase 6 is complete only when deterministic extraction preserves normalized eval
 
 ## CURRENT ACTION
 
-Complete the Phase 7 checkpoint: validate the isolated MVP composition and
-explicit check policy, record the live dogfood result, then commit and merge.
-Do not revive sandbox execution or expand the contract repository.
+Phase 7 checkpoint is merged. The next product phase may begin only after
+owner review of the live-dogfood credential-source issue recorded in the
+checkpoint report. Do not revive sandbox execution or expand the contract
+repository.
