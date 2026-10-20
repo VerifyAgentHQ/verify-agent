@@ -1101,9 +1101,10 @@ protected result reader
 GET /verification-jobs/:queueJobId/result
 ```
 
-Batch 50 is asynchronous result observation that is process-local,
-bounded, non-durable, explicitly protected, and not yet a general public
-production result API.
+Batch 50 is asynchronous result observation that is bounded, explicitly
+protected, and not a general public production result API. The active
+canonical service persists results in the durable SQLite registry; queue
+delivery itself remains process-local.
 
 - Protection: `Authorization: Bearer <configured-internal-result-token>`
   (`VERIFY_INTERNAL_RESULT_TOKEN`). Exact timing-safe comparison. No
@@ -1113,9 +1114,8 @@ production result API.
 - Fail-closed: the route is enabled only when BOTH a
   `VerificationResultReader` and a non-empty internal token are supplied.
   Reader-without-token (or token-without-reader) yields `404 route not
-found`, never a public endpoint. The API-only `startConfiguredApiServer()`
-  wires neither, so async result observation is unavailable there; the
-  Batch 51 `startConfiguredGitHubVerificationService()` wires the reader
+found`, never a public endpoint. The canonical
+  `startConfiguredGitHubVerificationService()` wires the reader
   plus the configured internal token into the same single-process service
   without weakening the protection.
 - Responses: missing/invalid auth → generic `401` regardless of whether

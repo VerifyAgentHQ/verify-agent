@@ -8,38 +8,10 @@ import type {
   VerificationStatus,
 } from "@verify-agent/domain";
 
-export interface PublicVerifyRequest {
-  readonly source: {
-    readonly kind: "snapshot";
-    readonly id: string;
-  };
-}
-
-export interface PublicVerificationResponse {
-  readonly status: VerificationStatus;
-  readonly coverage: {
-    readonly verified: readonly string[];
-    readonly partial: readonly string[];
-    readonly unsupported: readonly string[];
-    readonly notApplicable: readonly string[];
-  };
-  readonly checkResults: readonly CheckResultId[];
-  readonly findings: readonly FindingId[];
-  readonly evidenceReferences: readonly EvidenceId[];
-  readonly policyDecision: PolicyDecisionId;
-  readonly summary: string;
-  readonly resultVersion: string;
-  readonly contentHash: string;
-  readonly createdAt: string;
-  readonly requirementEvidence?: readonly RequirementEvidence[];
-  readonly checkRunEvidence?: readonly MvpCheckRunEvidence[];
-  readonly source: PublicVerifyRequest["source"];
-}
-
 /**
  * Batch 50 — safe public projection for asynchronous result observation.
  *
- * Reuses the same safe field subset as `PublicVerificationResponse`
+ * Exposes a safe field subset of `VerificationResult`
  * (status, coverage, findings, evidence references, policy decision,
  * summary, version, content hash) plus the three preserved identity
  * domains:

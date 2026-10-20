@@ -23,6 +23,8 @@ export interface VerificationResultRegistry {
   getByQueueJobId(queueJobId: string): VerificationResult | undefined;
   size(): number;
   clear(): void;
+  /** Release backend resources when the owning service is permanently closed. */
+  close?(): void;
 }
 
 export interface InMemoryVerificationResultRegistryOptions {

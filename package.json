@@ -2,6 +2,9 @@
   "name": "verify-agent",
   "version": "0.1.0-phase0",
   "private": true,
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "packageManager": "pnpm@9.12.3",
   "type": "module",
   "scripts": {
@@ -10,6 +13,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --config vitest.config.mjs",
+    "dogfood:fixture": "node scripts/dogfood-fixture.mjs",
     "lint": "tsc -b --pretty false"
   },
   "devDependencies": {

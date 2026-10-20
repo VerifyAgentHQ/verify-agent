@@ -178,6 +178,40 @@ updated.
 
 AI may summarize and explain deterministic evidence but may not determine the verdict.
 
+### Operational milestone — durable result storage
+
+DONE.
+
+- The canonical API composition now uses the SQLite result registry rather than
+  the legacy JSON file registry.
+- Committed results retain detailed MVP evidence across API process restarts.
+- The JSON registry remains available only for compatibility and migration
+  reference; it is not the active production path.
+- Deployment guarantees and current single-instance limitations are documented
+  in `docs/RESULT-STORAGE.md`.
+- The in-memory queue remains unchanged; distributed queue lifecycle is future
+  work and is not included in this milestone.
+
+### Operational milestone — synchronous endpoint removal
+
+DONE.
+
+- The unauthenticated `POST /verify` route was removed from the HTTP boundary.
+- Verification can enter the active runtime only through the authenticated
+  GitHub webhook and queue path.
+- Protected asynchronous result observation remains available only when an
+  internal bearer token and result reader are explicitly composed.
+
+### Operational milestone — GitHub App deployment and dogfood guide
+
+DONE.
+
+- Added the canonical GitHub App permission and installation contract.
+- Documented secret handling, persistent deployment, webhook configuration,
+  protected result observation, and live dogfood capture requirements.
+- Added `pnpm run dogfood:fixture` for deterministic local evidence/verdict/
+  comment/result-storage validation without credentials or external writes.
+
 ### Phase 10 — Broader dogfooding
 
 Test satisfied, violated, missing, ambiguous, unrelated, multi-file, PASS + UNKNOWN, and PASS + FAIL cases.
@@ -216,5 +250,6 @@ Phase 6 is complete only when deterministic extraction preserves normalized eval
 
 ## CURRENT ACTION
 
-Phase 8 is complete. The next roadmap phase is Phase 9 only after owner
-review. Do not revive sandbox execution or expand the contract repository.
+Phase 8 is complete and the durable result-storage operational milestone is
+complete. The next roadmap phase remains Phase 9 only after owner review. Do
+not revive sandbox execution or expand the contract repository.

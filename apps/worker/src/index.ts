@@ -64,6 +64,10 @@ export {
   createFileVerificationResultRegistry,
 } from "./result-registry.js";
 export {
+  createSqliteVerificationResultRegistry,
+  type SqliteVerificationResultRegistryOptions,
+} from "./sqlite-result-registry.js";
+export {
   createInMemoryVerificationJobQueue,
   type InMemoryVerificationJobQueue,
 } from "./in-memory-job-queue.js";

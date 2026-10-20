@@ -214,7 +214,7 @@ function configuredEnv(): NodeJS.ProcessEnv {
     VERIFY_INTERNAL_RESULT_TOKEN: INTERNAL_RESULT_TOKEN,
     VERIFY_RESULT_STORE_PATH: joinPath(
       tmpdir(),
-      `verifyagent-canonical-${randomUUID()}.json`,
+      `verifyagent-canonical-${randomUUID()}.sqlite`,
     ),
     // Ambient token must never become the publication credential.
     GITHUB_TOKEN: PERSONAL_TOKEN_SENTINEL,
@@ -388,10 +388,9 @@ describe("P1.5 — Canonical production startup regression", () => {
       expect(stored).not.toBeNull();
       expect(["pass", "fail", "needs_changes"]).toContain(stored?.status);
 
-      // 5. Verify /verify endpoint still works (internal/manual API)
+      // 5. The removed synchronous endpoint is not exposed by production.
       const verifyResponse = await httpGet(port, "/verify");
-      // /verify only accepts POST, so GET returns 405
-      expect(verifyResponse.status).toBe(405);
+      expect(verifyResponse.status).toBe(404);
     } finally {
       // Always stop/close the service
       await service.stop();
@@ -471,7 +470,7 @@ describe("P1.5 — Canonical production startup regression", () => {
     }
   });
 
-  it("/verify is an internal/manual API distinct from the webhook trust boundary", async () => {
+  it("does not expose unauthenticated synchronous verification", async () => {
     const double = createAppBoundaryDouble();
     const service = await startConfiguredProductionService({
       port: 0,
@@ -488,23 +487,16 @@ describe("P1.5 — Canonical production startup regression", () => {
       }
       const port = address.port;
 
-      // /verify accepts POST with snapshot source
+      // The old synchronous route is removed, so a caller cannot bypass the
+      // authenticated webhook and queue boundary.
+      const callsBefore = double.calls.length;
       const verifyResponse = await httpPost(
         port,
         "/verify",
         JSON.stringify({ source: { kind: "snapshot", id: "test-snap" } }),
       );
-      // Returns 200 with verification result (or 400/500 for invalid source)
-      // The key point: it works without GitHub webhook authentication
-      expect([200, 400, 500]).toContain(verifyResponse.status);
-
-      // But /verify does NOT accept GitHub webhook signatures
-      // (it's a different trust boundary)
-      const webhookPayload = makePayload();
-      const webhookToVerify = await httpPost(port, "/verify", webhookPayload);
-      // /verify doesn't validate webhook signatures; it expects { source: {...} }
-      // So a webhook payload will be rejected as invalid source shape (400)
-      expect(webhookToVerify.status).toBe(400);
+      expect(verifyResponse.status).toBe(404);
+      expect(double.calls.length).toBe(callsBefore);
     } finally {
       await service.stop();
     }

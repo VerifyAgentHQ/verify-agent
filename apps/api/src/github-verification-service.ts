@@ -7,6 +7,7 @@ import {
 import { createHash } from "node:crypto";
 import { brandId, type VerificationResultReader } from "@verify-agent/domain";
 import type { MvpVerificationApplicationService as VerificationApplicationServiceType } from "./mvp-application-service.js";
+import { createMvpVerificationApplicationService } from "./mvp-application-service.js";
 import {
   createGitHubVerificationOrchestrator,
   createConfiguredGitHubWebhookHandler,
@@ -16,7 +17,7 @@ import {
 } from "@verify-agent/github-bot";
 import {
   createInMemoryVerificationResultRegistry,
-  createFileVerificationResultRegistry,
+  createSqliteVerificationResultRegistry,
   createVerificationJobProcessor,
   createVerificationJobRuntime,
   createInMemoryVerificationJobQueue,
@@ -32,7 +33,6 @@ import {
   readGitHubAppConfig,
 } from "@verify-agent/adapters-source";
 import {
-  createConfiguredApplicationService,
   createVerificationRequestListener,
   readInternalResultToken,
 } from "./index.js";
@@ -156,7 +156,7 @@ export function createGitHubVerificationService(
   const registry: VerificationResultRegistry =
     dependencies.registry ??
     (dependencies.resultStorePath
-      ? createFileVerificationResultRegistry({
+      ? createSqliteVerificationResultRegistry({
           filePath: dependencies.resultStorePath,
           ...(dependencies.maxResults === undefined
             ? {}
@@ -202,7 +202,6 @@ export function createGitHubVerificationService(
   };
 
   const apiListener = createVerificationRequestListener(
-    applicationService,
     resultReader,
     internalResultToken === null ? {} : { internalResultToken },
   );
@@ -450,6 +449,7 @@ export function createGitHubVerificationService(
         detachCommentPublisher();
         await runtime.stopAutoProcessing();
         runtime.stop();
+        registry.close?.();
         started = false;
         await new Promise<void>((resolve, reject) => {
           if (!server.listening) {
@@ -575,7 +575,7 @@ export async function startConfiguredGitHubVerificationService(
   const secret = readGitHubWebhookSecret(env);
   const internalResultToken = readInternalResultToken(env);
   const applicationService =
-    options.applicationService ?? createConfiguredApplicationService();
+    options.applicationService ?? createMvpVerificationApplicationService();
   const commentPublisher = createConfiguredGitHubPrCommentPublisher(
     env,
     options.fetch === undefined ? undefined : { fetch: options.fetch },
@@ -586,7 +586,7 @@ export async function startConfiguredGitHubVerificationService(
     ...(internalResultToken === null ? {} : { internalResultToken }),
     commentPublisher,
     resultStorePath:
-      env.VERIFY_RESULT_STORE_PATH ?? ".local/verifyagent-results.json",
+      env.VERIFY_RESULT_STORE_PATH ?? ".local/verifyagent-results.sqlite",
   });
   const port = options.port ?? readConfiguredPort(env);
   const host = options.host ?? "0.0.0.0";

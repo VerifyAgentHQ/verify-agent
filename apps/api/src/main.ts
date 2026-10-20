@@ -10,10 +10,10 @@ import {
  * This entrypoint selects the full GitHub verification service composition:
  * - /webhook (authenticated GitHub production trust boundary)
  * - /health
- * - /verify (internal/manual API, NOT the GitHub webhook path)
+ * - protected asynchronous result observation when explicitly composed
  * - queue
  * - automatic runtime processing
- * - application service and file-backed result registry
+ * - application service and durable SQLite result registry
  * - protected result reader
  * - GitHub App source acquisition
  * - authoritative GitHub check-run consumption

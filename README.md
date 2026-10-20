@@ -38,7 +38,7 @@ This is not an AI code review tool. VerifyAgent gathers **evidence** about a sof
 ```text
 pull_request webhook -> queue/worker -> requirement and diff inspection
   -> GitHub Actions check-runs -> deterministic MVP verdict
-  -> durable JSON result -> one updated GitHub PR comment
+  -> durable SQLite result -> one updated GitHub PR comment
 ```
 
 GitHub Actions is authoritative for build, typecheck, lint, and test results. The custom `verify-sandbox` execution path and older local verification engine remain as frozen/legacy infrastructure; they are not authoritative for the GitHub PR MVP.
@@ -61,7 +61,7 @@ The following capabilities are fully implemented and tested:
 
 > **VerifyAgent has a working GitHub PR MVP, validated against a real PR and GitHub App installation.**
 
-The active path uses the authenticated webhook queue, deterministic PR requirement checks, GitHub check-run evidence, a file-backed result registry, and create-or-update PR comment publication. The legacy sandbox-backed engine is not part of the active verdict path.
+The active path uses the authenticated webhook queue, deterministic PR requirement checks, GitHub check-run evidence, a durable SQLite result registry, and create-or-update PR comment publication. The legacy sandbox-backed engine is not part of the active verdict path. See [docs/RESULT-STORAGE.md](docs/RESULT-STORAGE.md) for the persistence and deployment contract.
 
 ## Repository structure
 
@@ -97,8 +97,13 @@ future evaluation and compatibility work.
 - **Frozen boundary**: sandbox security claims apply only to the separate frozen sandbox project and are not claims about the active PR verifier.
 
 The authenticated `POST /webhook` route is the GitHub production entrypoint.
-The synchronous `POST /verify` route is an unauthenticated internal/manual API
-for controlled use and is not intended for public production exposure.
+The old synchronous `POST /verify` route is removed. Verification enters
+through the authenticated GitHub webhook and queue; there is no unauthenticated
+request path that can invoke verification directly.
+
+See [docs/GITHUB-APP-DEPLOYMENT.md](docs/GITHUB-APP-DEPLOYMENT.md) for the
+GitHub App installation contract, deployment requirements, and reproducible
+local dogfood command.
 
 ### CI policy configuration
 
