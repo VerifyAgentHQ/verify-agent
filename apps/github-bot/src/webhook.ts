@@ -828,7 +828,8 @@ export interface ConfiguredGitHubWebhookHandlerOptions {
  * Intended composition (owned by the composition root):
  *
  * ```text
- * VerificationJobQueue (in-memory for Batch 38; durable later)
+ * VerificationJobQueue (SQLite-backed in the canonical service; in-memory in
+ * focused tests)
  *     ↓
  * GitHubVerificationOrchestrator
  *     ↓
@@ -843,7 +844,7 @@ export interface ConfiguredGitHubWebhookHandlerOptions {
  *
  * No queue infrastructure, worker loop, persistence, retry, or durability
  * is provided in this batch; the in-memory adapter is explicitly
- * non-durable.
+ * durable in the canonical single-instance service.
  */
 export function createConfiguredGitHubWebhookHandler(
   options: ConfiguredGitHubWebhookHandlerOptions,

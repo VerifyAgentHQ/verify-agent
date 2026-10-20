@@ -44,6 +44,20 @@ pnpm run build
 pnpm --filter @verify-agent/api start
 ```
 
+For a reproducible release artifact, build the active API image from the
+repository root:
+
+```text
+docker build --tag verifyagent:<git-sha> .
+docker compose -f compose.example.yml up --build -d
+```
+
+Copy `.env.example` to an ignored `.env`, fill it through the deployment
+secret manager, and keep the named `verifyagent-results` volume. The image runs
+as an unprivileged user, has no repository checkout or sandbox capability, and
+exposes only the API port. The health check and `restart: unless-stopped`
+provide explicit process-failure behavior for the example deployment.
+
 Expose the service's HTTPS endpoint to GitHub and configure the App webhook URL
 as:
 
@@ -56,6 +70,13 @@ Use a persistent writable volume for the directory containing
 SQLite durability and backup contract. The service must be single-instance in
 the current MVP; do not point multiple independent processes at one SQLite
 file.
+
+The durable SQLite queue recovers pending and interrupted jobs after a process
+restart. A verification failure is requeued by the worker, while a successful
+job is acknowledged only after its detailed result commits. GitHub webhook
+validation failures return `401`/`400`; unsupported routes return `404`; a
+startup configuration or database failure exits the process instead of serving
+an empty or unauthenticated verifier.
 
 The health endpoint is:
 

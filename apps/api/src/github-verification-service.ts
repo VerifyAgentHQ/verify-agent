@@ -21,6 +21,7 @@ import {
   createVerificationJobProcessor,
   createVerificationJobRuntime,
   createInMemoryVerificationJobQueue,
+  createSqliteVerificationJobQueue,
   type VerificationJobProcessor,
   type VerificationJobRuntime,
   type VerificationJobSettledOutcome,
@@ -48,14 +49,14 @@ import {
 /**
  * Batch 51 — Runnable In-Process GitHub Verification Service.
  *
- * Single-process composition sharing ONE queue, ONE runtime, ONE processor,
+ * Single-process composition sharing ONE durable queue, ONE runtime, ONE processor,
  * ONE result registry, ONE protected API listener, and ONE GitHub webhook
  * boundary:
  *
  * ```text
  * GitHub webhook (POST /webhook, HMAC + replay + immutable head SHA)
  *     ↓ VerificationQueueJob (202 + queueJobId)
- * shared in-memory queue
+ * durable SQLite queue (or injected in-memory queue for tests)
  *     ↓ application-owned runtime (automatic, event-driven, sequential)
  * VerificationJobProcessor → VerificationApplicationService.verifySource()
  *     ↓ MVP GitHub evidence and deterministic requirement/policy evaluation
@@ -68,8 +69,8 @@ import {
  * - `runtime registry === API result reader`.
  * - The webhook only enqueues verified jobs; it never calls
  *   `verifySource()`, `processNext()`, or the sandbox.
- * - Failures yield `failed` outcomes, register nothing, and keep the
- *   runtime usable. No retries, no dead-letter queues.
+ * - Failed jobs are requeued by the durable queue; successful jobs are
+ *   acknowledged after result persistence. No dead-letter queue exists yet.
  * - Nothing secret is logged; no logging framework is introduced.
  * - Sequential in-process execution; no parallel workers.
  *
@@ -152,7 +153,12 @@ export function createGitHubVerificationService(
   }
 
   const queue: InMemoryVerificationJobQueue =
-    dependencies.queue ?? createInMemoryVerificationJobQueue();
+    dependencies.queue ??
+    (dependencies.resultStorePath
+      ? createSqliteVerificationJobQueue({
+          filePath: dependencies.resultStorePath,
+        })
+      : createInMemoryVerificationJobQueue());
   const registry: VerificationResultRegistry =
     dependencies.registry ??
     (dependencies.resultStorePath
@@ -449,6 +455,7 @@ export function createGitHubVerificationService(
         detachCommentPublisher();
         await runtime.stopAutoProcessing();
         runtime.stop();
+        queue.close?.();
         registry.close?.();
         started = false;
         await new Promise<void>((resolve, reject) => {

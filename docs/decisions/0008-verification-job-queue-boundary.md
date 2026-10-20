@@ -4,6 +4,12 @@
 
 Accepted
 
+The original Phase 0 decision below describes the in-memory adapter. The
+canonical single-instance MVP now supplies the same port with a SQLite-backed
+queue that recovers unfinished jobs and acknowledges them after result
+persistence. The in-memory adapter remains for focused tests and lightweight
+compositions. Multi-instance coordination remains future work.
+
 ## Decision
 
 Introduce a provider-neutral asynchronous boundary between the authenticated

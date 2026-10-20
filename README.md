@@ -105,6 +105,11 @@ See [docs/GITHUB-APP-DEPLOYMENT.md](docs/GITHUB-APP-DEPLOYMENT.md) for the
 GitHub App installation contract, deployment requirements, and reproducible
 local dogfood command.
 
+The active API also has a reproducible container artifact (`Dockerfile`) and
+an example single-instance deployment (`compose.example.yml`). The queue and
+SQLite result store are durable across process restart, but multi-instance
+coordination remains outside the current MVP.
+
 ### CI policy configuration
 
 The `VERIFY_REQUIRED_CHECKS` environment variable defines the repository's
@@ -204,12 +209,13 @@ Additional ecosystems are future work and are not part of the active MVP.
 
 _Repository hygiene, permanent test classification, documentation accuracy_ ✓ **COMPLETE**
 
-### P2 — Durable verification lifecycle
+### P2 — Distributed verification lifecycle
 
-_Replace in-memory queue/result registry with authoritative durable store_
+_Replace the single-instance SQLite lifecycle with a multi-instance durable store_
 
 - Preserves: VerificationResult model, policy semantics, evidence semantics, source identity, snapshot identity, dependency identity, and the frozen sandbox/check-publication contracts
-- Adds: Redis/SQS/BullMQ queue, persistent result storage, worker recovery
+- Adds: coordinated database/queue storage, multi-instance worker recovery,
+  retries, and dead-letter handling
 
 ### P3 — Worker recovery and idempotent retries
 
@@ -229,7 +235,8 @@ _Rate limiting, multi-repository support, policy configurability, audit logging_
 
 ## P2 Boundary
 
-P2 will replace the current in-memory queue and result registry as the authoritative lifecycle store. P2 must preserve:
+P2 will replace the current single-instance SQLite queue and result registry as
+the authoritative multi-instance lifecycle store. P2 must preserve:
 
 - VerificationResult model
 - Policy semantics
@@ -240,7 +247,8 @@ P2 will replace the current in-memory queue and result registry as the authorita
 - Sandbox execution contract
 - GitHub Check Run contract
 
-P1 does NOT implement any of this.
+The current MVP already has restart-safe SQLite queue/result storage for one
+service instance. It does not claim multi-instance coordination.
 
 ## Documentation
 

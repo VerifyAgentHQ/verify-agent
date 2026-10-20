@@ -10,6 +10,9 @@ export interface InMemoryVerificationJobQueue extends VerificationJobQueue {
   clear(): void;
   dequeue(): Promise<VerificationQueueJob | null>;
   onEnqueue(listener: () => void): () => void;
+  acknowledge?(jobId: string): Promise<void> | void;
+  reject?(jobId: string): Promise<void> | void;
+  close?(): void;
 }
 
 export function createInMemoryVerificationJobQueue(): InMemoryVerificationJobQueue {

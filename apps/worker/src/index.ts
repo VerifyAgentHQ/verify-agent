@@ -71,9 +71,13 @@ export {
   createInMemoryVerificationJobQueue,
   type InMemoryVerificationJobQueue,
 } from "./in-memory-job-queue.js";
+export {
+  createSqliteVerificationJobQueue,
+  type SqliteVerificationJobQueueOptions,
+} from "./sqlite-job-queue.js";
 
 export const workerBoundary = {
   status: "implemented-batch51",
   purpose:
-    "Provider-neutral VerificationQueueJob → VerificationApplicationService boundary. No webhook, GitHub, queue infrastructure, durability, or retries. Consumption is explicit by default with opt-in automatic in-process consumption owned by the application.",
+    "Provider-neutral VerificationQueueJob → VerificationApplicationService boundary. No webhook or GitHub concerns. The canonical service supplies durable SQLite queue/result adapters; focused tests may inject in-memory adapters.",
 };

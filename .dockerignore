@@ -1,0 +1,12 @@
+.git
+.github
+.local
+.tmp
+node_modules
+**/dist
+*.log
+.env
+.env.*
+!.env.example
+coverage
+operator-artifacts

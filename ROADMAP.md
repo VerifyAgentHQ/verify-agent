@@ -189,8 +189,8 @@ DONE.
   reference; it is not the active production path.
 - Deployment guarantees and current single-instance limitations are documented
   in `docs/RESULT-STORAGE.md`.
-- The in-memory queue remains unchanged; distributed queue lifecycle is future
-  work and is not included in this milestone.
+- The durable queue remains single-instance; distributed queue lifecycle is
+  future work and is not included in this milestone.
 
 ### Operational milestone — synchronous endpoint removal
 
@@ -211,6 +211,19 @@ DONE.
   protected result observation, and live dogfood capture requirements.
 - Added `pnpm run dogfood:fixture` for deterministic local evidence/verdict/
   comment/result-storage validation without credentials or external writes.
+
+### Operational milestone — deployable single-instance runtime
+
+DONE.
+
+- Added a reproducible Node 22 container artifact and example compose
+  deployment for the active API only.
+- Added a durable SQLite queue with restart recovery, failure requeue, and
+  acknowledgement after result persistence.
+- Documented health checks, startup failure behavior, webhook error behavior,
+  persistent volumes, secret handling, and the single-instance boundary.
+- Multi-instance coordination and independently hosted public deployment remain
+  owner-controlled follow-up work; they are not claimed by this milestone.
 
 ### Phase 10 — Broader dogfooding
 
@@ -250,6 +263,8 @@ Phase 6 is complete only when deterministic extraction preserves normalized eval
 
 ## CURRENT ACTION
 
-Phase 8 is complete and the durable result-storage operational milestone is
-complete. The next roadmap phase remains Phase 9 only after owner review. Do
-not revive sandbox execution or expand the contract repository.
+Phase 8 and the operational deployment-hardening milestones are complete for
+the single-instance runtime. The next roadmap phase remains Phase 9 only after
+owner review. Multi-instance coordination, hosted deployment, and release
+publishing remain owner-controlled follow-up work. Do not revive sandbox
+execution or expand the contract repository.

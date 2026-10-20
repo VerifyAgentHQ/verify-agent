@@ -38,8 +38,10 @@ content hash used by the MVP observation path.
 
 ## Current limitations
 
-The queue is still in memory, so an in-flight job can be lost if the process
-terminates before its result commits. The SQLite adapter is intended for the
-current single-instance MVP and must not be shared by multiple independent API
-processes. A future distributed queue/result adapter can implement the same
-registry boundary when the roadmap calls for it.
+The active canonical service uses a SQLite queue and result registry. Jobs are
+recovered when a process restarts before acknowledgement; an actively
+executing job is returned to pending and may run again, so verification must
+remain idempotent. The adapters are intended for the current single-instance
+MVP and must not be shared by multiple independent API processes. A future
+distributed database/queue adapter can implement the same boundaries when
+multi-instance operation is required.

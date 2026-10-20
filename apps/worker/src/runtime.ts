@@ -14,8 +14,8 @@ export class VerificationJobRuntimeError extends Error {
 
 /**
  * Minimal application-level queue consumer surface for the job runtime.
- * Satisfied structurally by the existing in-memory queue; no queue
- * internals (arrays, snapshots, sizes) are visible here.
+ * Satisfied structurally by both the in-memory test queue and the durable
+ * SQLite queue; no queue internals (arrays, snapshots, sizes) are visible here.
  *
  * Batch 51 — queues MAY expose an optional synchronous wakeup
  * notification (`onEnqueue`) invoked after each successful enqueue.
@@ -26,6 +26,8 @@ export class VerificationJobRuntimeError extends Error {
 export interface ConsumableVerificationJobQueue {
   enqueue(job: VerificationQueueJob): Promise<void>;
   dequeue(): Promise<VerificationQueueJob | null>;
+  acknowledge?(jobId: string): Promise<void> | void;
+  reject?(jobId: string): Promise<void> | void;
   onEnqueue?(listener: () => void): () => void;
 }
 
@@ -127,18 +129,19 @@ export interface VerificationJobRuntimeOptions {
 }
 
 /**
- * In-process application runtime owning queued-job consumption.
+ * Application runtime owning queued-job consumption.
  *
  * The runtime orchestrates only: take a job from the queue, process it
  * through the existing worker boundary, and register the successful result
- * correlated with the originating queue job identity in the bounded
- * in-memory registry. It knows nothing about ecosystems,
+ * correlated with the originating queue job identity in the result registry.
+ * It knows nothing about ecosystems,
  * sandbox execution, evidence, or policy — those remain behind
  * `VerificationApplicationService.verifySource()`.
  *
  * Consumption is explicit and deterministic (`processNext()` / `drain()`).
- * There is no background polling, no timers, no durability, and no retries:
- * a failed job is reported on its outcome and the runtime moves on.
+ * Durable queues may requeue a failed or interrupted job through the optional
+ * acknowledgement boundary; the in-memory queue retains its historical
+ * one-process behavior.
  *
  * Batch 51 adds opt-in automatic consumption (`startAutoProcessing()`):
  * a single sequential loop over the same `processNext()` path, woken
@@ -227,9 +230,17 @@ export function createVerificationJobRuntime(
     try {
       result = await processor.process(job);
     } catch (error) {
+      await queue.reject?.(job.jobId);
       return { kind: "failed", job, error };
     }
-    const stored = registry.store(job.jobId, result);
+    let stored: VerificationResult;
+    try {
+      stored = registry.store(job.jobId, result);
+      await queue.acknowledge?.(job.jobId);
+    } catch (error) {
+      await queue.reject?.(job.jobId);
+      throw error;
+    }
     return { kind: "completed", job, result: stored };
   }
 
